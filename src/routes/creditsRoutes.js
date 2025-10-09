@@ -1,8 +1,9 @@
 const express = require('express');
 const router = express.Router();
 const { authenticateUser } = require('../middleware/auth');
+const { authenticateUserDb } = require('../middleware/dbAuth');
 const logger = require('../utils/logger');
-const { CreditRecord } = require('../models');
+const { CreditRecord, User } = require('../models');
 const cardKeyService = require('../services/cardKeyService');
 
 /**
@@ -133,19 +134,29 @@ router.post('/redeem', authenticateUser, async (req, res) => {
 });
 
 // 获取用户积分余额
-router.get('/balance', authenticateUser, async (req, res) => {
+router.get('/balance', authenticateUserDb, async (req, res) => {
   try {
     const userId = req.user.id;
 
-    // TODO: 从数据库获取实际余额
-    // 暂时返回模拟数据
+    const user = await User.findById(userId);
+    
+    if (!user) {
+      return res.status(404).json({
+        error: 'User not found',
+        message: '用户不存在'
+      });
+    }
+
+    user.resetDailyUsage();
+    await user.save();
+
     res.json({
       success: true,
-      userId,
-      credits: 12500,
-      dailyLimit: 18000,
-      usedToday: 2340,
-      resetTime: new Date(Date.now() + 14400000).toISOString(), // 4小时后
+      userId: user._id,
+      credits: user.credits,
+      dailyLimit: user.subscription.dailyCredits || 0,
+      usedToday: user.todayUsage,
+      resetTime: new Date(user.lastCreditReset.getTime() + 86400000).toISOString(),
     });
   } catch (error) {
     logger.error('获取积分余额失败:', error);

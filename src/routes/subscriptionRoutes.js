@@ -1,7 +1,9 @@
 const express = require('express');
 const router = express.Router();
 const { authenticateUser } = require('../middleware/auth');
+const { authenticateUserDb } = require('../middleware/dbAuth');
 const logger = require('../utils/logger');
+const { User, Order } = require('../models');
 
 /**
  * 订阅管理路由
@@ -9,12 +11,45 @@ const logger = require('../utils/logger');
  */
 
 // 获取用户订阅信息
-router.get('/', authenticateUser, async (req, res) => {
+router.get('/', authenticateUserDb, async (req, res) => {
   try {
     const userId = req.user.id;
 
-    // TODO: 从数据库获取用户订阅信息
-    // 暂时返回模拟数据
+    const user = await User.findById(userId);
+    
+    if (!user) {
+      return res.status(404).json({
+        error: 'User not found',
+        message: '用户不存在'
+      });
+    }
+
+    if (!user.subscription || user.subscription.planId === 'free') {
+      return res.json({
+        success: true,
+        userId,
+        plan: '免费版',
+        planId: 'free',
+        dailyCredits: 1000,
+        status: 'active',
+        message: '您当前使用的是免费版'
+      });
+    }
+
+    res.json({
+      success: true,
+      userId,
+      plan: user.subscription.planName,
+      planId: user.subscription.planId,
+      dailyCredits: user.subscription.dailyCredits,
+      startDate: user.subscription.startDate,
+      expiryDate: user.subscription.expiryDate,
+      autoRenew: user.subscription.autoRenew,
+      status: user.subscription.status,
+    });
+    
+    return;
+    
     const mockSubscription = {
       userId,
       plan: '专业版',

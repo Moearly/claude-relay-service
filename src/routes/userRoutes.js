@@ -275,7 +275,7 @@ router.post('/logout', authenticateUser, async (req, res) => {
 // 👤 获取当前用户信息
 router.get('/profile', authenticateUser, async (req, res) => {
   try {
-    const user = await userService.getUserById(req.user.id)
+    const user = await userServiceDb.getUserById(req.user.id)
     if (!user) {
       return res.status(404).json({
         error: 'User not found',
