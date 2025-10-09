@@ -25,6 +25,9 @@ const openaiRoutes = require('./routes/openaiRoutes')
 const userRoutes = require('./routes/userRoutes')
 const azureOpenaiRoutes = require('./routes/azureOpenaiRoutes')
 const webhookRoutes = require('./routes/webhook')
+const creditsRoutes = require('./routes/creditsRoutes')
+const subscriptionRoutes = require('./routes/subscriptionRoutes')
+const announcementsRoutes = require('./routes/announcementsRoutes')
 
 // Import middleware
 const {
@@ -256,6 +259,10 @@ class Application {
       // 使用 web 路由（包含 auth 和页面重定向）
       this.app.use('/web', webRoutes)
       this.app.use('/apiStats', apiStatsRoutes)
+      // 💰 商业化功能路由
+      this.app.use('/users/credits', creditsRoutes)
+      this.app.use('/users/subscription', subscriptionRoutes)
+      this.app.use('/announcements', announcementsRoutes)
       // Gemini 路由：同时支持标准格式和原有格式
       this.app.use('/gemini', standardGeminiRoutes) // 标准 Gemini API 格式路由
       this.app.use('/gemini', geminiRoutes) // 保留原有路径以保持向后兼容
