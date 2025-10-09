@@ -1,593 +1,461 @@
-const redis = require('../models/redis')
-const crypto = require('crypto')
-const logger = require('../utils/logger')
-const config = require('../../config/config')
+const { User, CreditRecord } = require('../models');
+const logger = require('../utils/logger');
+const jwt = require('jsonwebtoken');
+const config = require('../../config/config');
 
+/**
+ * 用户服务
+ */
 class UserService {
-  constructor() {
-    this.userPrefix = 'user:'
-    this.usernamePrefix = 'username:'
-    this.userSessionPrefix = 'user_session:'
-  }
-
-  // 🔑 生成用户ID
-  generateUserId() {
-    return crypto.randomBytes(16).toString('hex')
-  }
-
-  // 🔑 生成会话Token
-  generateSessionToken() {
-    return crypto.randomBytes(32).toString('hex')
-  }
-
-  // 👤 创建或更新用户
-  async createOrUpdateUser(userData) {
+  /**
+   * 用户注册
+   */
+  async register(userData) {
     try {
-      const {
+      const { username, email, password } = userData;
+
+      // 检查用户名是否已存在
+      const existingUsername = await User.findOne({ username });
+      if (existingUsername) {
+        return {
+          success: false,
+          error: 'Username already exists',
+          message: '用户名已被使用',
+        };
+      }
+
+      // 检查邮箱是否已存在
+      const existingEmail = await User.findOne({ email });
+      if (existingEmail) {
+        return {
+          success: false,
+          error: 'Email already exists',
+          message: '邮箱已被注册',
+        };
+      }
+
+      // 创建新用户
+      const user = new User({
         username,
         email,
-        displayName,
-        firstName,
-        lastName,
-        role = config.userManagement.defaultUserRole,
-        isActive = true
-      } = userData
-
-      // 检查用户是否已存在
-      let user = await this.getUserByUsername(username)
-      const isNewUser = !user
-
-      if (isNewUser) {
-        const userId = this.generateUserId()
-        user = {
-          id: userId,
-          username,
-          email,
-          displayName,
-          firstName,
-          lastName,
-          role,
-          isActive,
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-          lastLoginAt: null,
-          apiKeyCount: 0,
-          totalUsage: {
-            requests: 0,
-            inputTokens: 0,
-            outputTokens: 0,
-            totalCost: 0
-          }
-        }
-      } else {
-        // 更新现有用户信息
-        user = {
-          ...user,
-          email,
-          displayName,
-          firstName,
-          lastName,
-          updatedAt: new Date().toISOString()
-        }
-      }
-
-      // 保存用户信息
-      await redis.set(`${this.userPrefix}${user.id}`, JSON.stringify(user))
-      await redis.set(`${this.usernamePrefix}${username}`, user.id)
-
-      // 如果是新用户，尝试转移匹配的API Keys
-      if (isNewUser) {
-        await this.transferMatchingApiKeys(user)
-      }
-
-      logger.info(`📝 ${isNewUser ? 'Created' : 'Updated'} user: ${username} (${user.id})`)
-      return user
-    } catch (error) {
-      logger.error('❌ Error creating/updating user:', error)
-      throw error
-    }
-  }
-
-  // 👤 通过用户名获取用户
-  async getUserByUsername(username) {
-    try {
-      const userId = await redis.get(`${this.usernamePrefix}${username}`)
-      if (!userId) {
-        return null
-      }
-
-      const userData = await redis.get(`${this.userPrefix}${userId}`)
-      return userData ? JSON.parse(userData) : null
-    } catch (error) {
-      logger.error('❌ Error getting user by username:', error)
-      throw error
-    }
-  }
-
-  // 👤 通过ID获取用户
-  async getUserById(userId, calculateUsage = true) {
-    try {
-      const userData = await redis.get(`${this.userPrefix}${userId}`)
-      if (!userData) {
-        return null
-      }
-
-      const user = JSON.parse(userData)
-
-      // Calculate totalUsage by aggregating user's API keys usage (if requested)
-      if (calculateUsage) {
-        try {
-          const usageStats = await this.calculateUserUsageStats(userId)
-          user.totalUsage = usageStats.totalUsage
-          user.apiKeyCount = usageStats.apiKeyCount
-        } catch (error) {
-          logger.error('❌ Error calculating user usage stats:', error)
-          // Fallback to stored values if calculation fails
-          user.totalUsage = user.totalUsage || {
-            requests: 0,
-            inputTokens: 0,
-            outputTokens: 0,
-            totalCost: 0
-          }
-          user.apiKeyCount = user.apiKeyCount || 0
-        }
-      }
-
-      return user
-    } catch (error) {
-      logger.error('❌ Error getting user by ID:', error)
-      throw error
-    }
-  }
-
-  // 📊 计算用户使用统计（通过聚合API Keys）
-  async calculateUserUsageStats(userId) {
-    try {
-      // Use the existing apiKeyService method which already includes usage stats
-      const apiKeyService = require('./apiKeyService')
-      const userApiKeys = await apiKeyService.getUserApiKeys(userId, true) // Include deleted keys for stats
-
-      const totalUsage = {
-        requests: 0,
-        inputTokens: 0,
-        outputTokens: 0,
-        totalCost: 0
-      }
-
-      for (const apiKey of userApiKeys) {
-        if (apiKey.usage && apiKey.usage.total) {
-          totalUsage.requests += apiKey.usage.total.requests || 0
-          totalUsage.inputTokens += apiKey.usage.total.inputTokens || 0
-          totalUsage.outputTokens += apiKey.usage.total.outputTokens || 0
-          totalUsage.totalCost += apiKey.totalCost || 0
-        }
-      }
-
-      logger.debug(
-        `📊 Calculated user ${userId} usage: ${totalUsage.requests} requests, ${totalUsage.inputTokens} input tokens, $${totalUsage.totalCost.toFixed(4)} total cost from ${userApiKeys.length} API keys`
-      )
-
-      // Count only non-deleted API keys for the user's active count
-      const activeApiKeyCount = userApiKeys.filter((key) => key.isDeleted !== 'true').length
-
-      return {
-        totalUsage,
-        apiKeyCount: activeApiKeyCount
-      }
-    } catch (error) {
-      logger.error('❌ Error calculating user usage stats:', error)
-      return {
-        totalUsage: {
-          requests: 0,
-          inputTokens: 0,
-          outputTokens: 0,
-          totalCost: 0
+        password,
+        displayName: username,
+        role: 'user',
+        credits: 1000, // 注册赠送1000积分
+        subscription: {
+          planId: 'free',
+          planName: '免费版',
+          dailyCredits: 1000,
+          status: 'active',
         },
-        apiKeyCount: 0
-      }
-    }
-  }
+      });
 
-  // 📋 获取所有用户列表（管理员功能）
-  async getAllUsers(options = {}) {
-    try {
-      const client = redis.getClientSafe()
-      const { page = 1, limit = 20, role, isActive } = options
-      const pattern = `${this.userPrefix}*`
-      const keys = await client.keys(pattern)
+      // 生成邀请码
+      user.generateInvitationCode();
 
-      const users = []
-      for (const key of keys) {
-        const userData = await client.get(key)
-        if (userData) {
-          const user = JSON.parse(userData)
+      await user.save();
 
-          // 应用过滤条件
-          if (role && user.role !== role) {
-            continue
-          }
-          if (typeof isActive === 'boolean' && user.isActive !== isActive) {
-            continue
-          }
+      // 记录赠送积分
+      await this.addCreditRecord({
+        userId: user._id,
+        type: 'gift',
+        amount: 1000,
+        balanceBefore: 0,
+        balanceAfter: 1000,
+        description: '新用户注册赠送',
+        source: 'registration',
+      });
 
-          // Calculate dynamic usage stats for each user
-          try {
-            const usageStats = await this.calculateUserUsageStats(user.id)
-            user.totalUsage = usageStats.totalUsage
-            user.apiKeyCount = usageStats.apiKeyCount
-          } catch (error) {
-            logger.error(`❌ Error calculating usage for user ${user.id}:`, error)
-            // Fallback to stored values
-            user.totalUsage = user.totalUsage || {
-              requests: 0,
-              inputTokens: 0,
-              outputTokens: 0,
-              totalCost: 0
-            }
-            user.apiKeyCount = user.apiKeyCount || 0
-          }
-
-          users.push(user)
-        }
-      }
-
-      // 排序和分页
-      users.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
-      const startIndex = (page - 1) * limit
-      const endIndex = startIndex + limit
-      const paginatedUsers = users.slice(startIndex, endIndex)
+      logger.info(`✅ 新用户注册成功: ${username} (${email})`);
 
       return {
-        users: paginatedUsers,
-        total: users.length,
-        page,
-        limit,
-        totalPages: Math.ceil(users.length / limit)
-      }
+        success: true,
+        message: '注册成功',
+        user: {
+          id: user._id,
+          username: user.username,
+          email: user.email,
+          displayName: user.displayName,
+          credits: user.credits,
+          invitationCode: user.invitationCode,
+        },
+      };
     } catch (error) {
-      logger.error('❌ Error getting all users:', error)
-      throw error
+      logger.error('❌ 用户注册失败:', error);
+      return {
+        success: false,
+        error: 'Registration failed',
+        message: '注册失败，请稍后重试',
+      };
     }
   }
 
-  // 🔄 更新用户状态
-  async updateUserStatus(userId, isActive) {
+  /**
+   * 用户登录（使用数据库）
+   */
+  async login(username, password) {
     try {
-      const user = await this.getUserById(userId, false) // Skip usage calculation
+      // 查找用户
+      const user = await User.findOne({
+        $or: [{ username }, { email: username }],
+      });
+
       if (!user) {
-        throw new Error('User not found')
+        return {
+          success: false,
+          error: 'Invalid credentials',
+          message: '用户名或密码错误',
+        };
       }
 
-      user.isActive = isActive
-      user.updatedAt = new Date().toISOString()
+      // 检查账户是否被锁定
+      if (user.lockUntil && user.lockUntil > Date.now()) {
+        const minutesLeft = Math.ceil((user.lockUntil - Date.now()) / 60000);
+        return {
+          success: false,
+          error: 'Account locked',
+          message: `账户已被锁定，请在 ${minutesLeft} 分钟后重试`,
+        };
+      }
 
-      await redis.set(`${this.userPrefix}${userId}`, JSON.stringify(user))
-      logger.info(`🔄 Updated user status: ${user.username} -> ${isActive ? 'active' : 'disabled'}`)
-
-      // 如果禁用用户，删除所有会话并禁用其所有API Keys
-      if (!isActive) {
-        await this.invalidateUserSessions(userId)
-
-        // Disable all user's API keys when user is disabled
-        try {
-          const apiKeyService = require('./apiKeyService')
-          const result = await apiKeyService.disableUserApiKeys(userId)
-          logger.info(`🔑 Disabled ${result.count} API keys for disabled user: ${user.username}`)
-        } catch (error) {
-          logger.error('❌ Error disabling user API keys during user disable:', error)
+      // 验证密码
+      const isMatch = await user.comparePassword(password);
+      if (!isMatch) {
+        // 增加失败次数
+        user.failedLoginAttempts += 1;
+        
+        // 如果失败次数超过5次，锁定账户30分钟
+        if (user.failedLoginAttempts >= 5) {
+          user.lockUntil = Date.now() + 30 * 60 * 1000;
+          logger.warn(`⚠️ 账户被锁定: ${username} (失败次数: ${user.failedLoginAttempts})`);
         }
+        
+        await user.save();
+        
+        return {
+          success: false,
+          error: 'Invalid credentials',
+          message: '用户名或密码错误',
+        };
       }
 
-      return user
+      // 重置失败次数
+      user.failedLoginAttempts = 0;
+      user.lockUntil = null;
+      user.lastLogin = Date.now();
+      
+      // 重置每日使用量（如果需要）
+      user.resetDailyUsage();
+      
+      await user.save();
+
+      // 生成Token
+      const token = this.generateToken(user);
+
+      logger.info(`✅ 用户登录成功: ${username}`);
+
+      return {
+        success: true,
+        message: '登录成功',
+        token,
+        user: {
+          id: user._id,
+          username: user.username,
+          email: user.email,
+          displayName: user.displayName,
+          role: user.role,
+          credits: user.credits,
+          subscription: user.subscription,
+        },
+      };
     } catch (error) {
-      logger.error('❌ Error updating user status:', error)
-      throw error
+      logger.error('❌ 用户登录失败:', error);
+      return {
+        success: false,
+        error: 'Login failed',
+        message: '登录失败，请稍后重试',
+      };
     }
   }
 
-  // 🔄 更新用户角色
-  async updateUserRole(userId, role) {
+  /**
+   * 生成JWT Token
+   */
+  generateToken(user) {
+    const payload = {
+      id: user._id,
+      username: user.username,
+      email: user.email,
+      role: user.role,
+    };
+
+    const secret = config.jwt?.secret || process.env.JWT_SECRET || 'your-secret-key-change-in-production';
+    const expiresIn = config.jwt?.expiresIn || '7d';
+
+    return jwt.sign(payload, secret, { expiresIn });
+  }
+
+  /**
+   * 验证Token
+   */
+  verifyToken(token) {
     try {
-      const user = await this.getUserById(userId, false) // Skip usage calculation
+      const secret = config.jwt?.secret || process.env.JWT_SECRET || 'your-secret-key-change-in-production';
+      return jwt.verify(token, secret);
+    } catch (error) {
+      return null;
+    }
+  }
+
+  /**
+   * 获取用户信息
+   */
+  async getUserById(userId) {
+    try {
+      const user = await User.findById(userId);
       if (!user) {
-        throw new Error('User not found')
+        return null;
       }
 
-      user.role = role
-      user.updatedAt = new Date().toISOString()
+      // 重置每日使用量
+      user.resetDailyUsage();
+      await user.save();
 
-      await redis.set(`${this.userPrefix}${userId}`, JSON.stringify(user))
-      logger.info(`🔄 Updated user role: ${user.username} -> ${role}`)
-
-      return user
+      return user;
     } catch (error) {
-      logger.error('❌ Error updating user role:', error)
-      throw error
+      logger.error('❌ 获取用户信息失败:', error);
+      return null;
     }
   }
 
-  // 📊 更新用户API Key数量 (已废弃，现在通过聚合计算)
-  async updateUserApiKeyCount(userId, _count) {
-    // This method is deprecated since apiKeyCount is now calculated dynamically
-    // in getUserById by aggregating the user's API keys
-    logger.debug(
-      `📊 updateUserApiKeyCount called for ${userId} but is now deprecated (count auto-calculated)`
-    )
-  }
-
-  // 📝 记录用户登录
-  async recordUserLogin(userId) {
+  /**
+   * 更新用户信息
+   */
+  async updateUser(userId, updates) {
     try {
-      const user = await this.getUserById(userId, false) // Skip usage calculation
-      if (!user) {
-        return
-      }
-
-      user.lastLoginAt = new Date().toISOString()
-      await redis.set(`${this.userPrefix}${userId}`, JSON.stringify(user))
-    } catch (error) {
-      logger.error('❌ Error recording user login:', error)
-    }
-  }
-
-  // 🎫 创建用户会话
-  async createUserSession(userId, sessionData = {}) {
-    try {
-      const sessionToken = this.generateSessionToken()
-      const session = {
-        token: sessionToken,
+      const user = await User.findByIdAndUpdate(
         userId,
-        createdAt: new Date().toISOString(),
-        expiresAt: new Date(Date.now() + config.userManagement.userSessionTimeout).toISOString(),
-        ...sessionData
-      }
+        { $set: updates, updatedAt: Date.now() },
+        { new: true }
+      );
 
-      const ttl = Math.floor(config.userManagement.userSessionTimeout / 1000)
-      await redis.setex(`${this.userSessionPrefix}${sessionToken}`, ttl, JSON.stringify(session))
-
-      logger.info(`🎫 Created session for user: ${userId}`)
-      return sessionToken
+      return {
+        success: true,
+        user,
+      };
     } catch (error) {
-      logger.error('❌ Error creating user session:', error)
-      throw error
+      logger.error('❌ 更新用户信息失败:', error);
+      return {
+        success: false,
+        error: 'Update failed',
+        message: '更新失败',
+      };
     }
   }
 
-  // 🎫 验证用户会话
-  async validateUserSession(sessionToken) {
+  /**
+   * 添加积分记录
+   */
+  async addCreditRecord(recordData) {
     try {
-      const sessionData = await redis.get(`${this.userSessionPrefix}${sessionToken}`)
-      if (!sessionData) {
-        return null
-      }
-
-      const session = JSON.parse(sessionData)
-
-      // 检查会话是否过期
-      if (new Date() > new Date(session.expiresAt)) {
-        await this.invalidateUserSession(sessionToken)
-        return null
-      }
-
-      // 获取用户信息
-      const user = await this.getUserById(session.userId, false) // Skip usage calculation for validation
-      if (!user || !user.isActive) {
-        await this.invalidateUserSession(sessionToken)
-        return null
-      }
-
-      return { session, user }
+      const record = new CreditRecord(recordData);
+      await record.save();
+      return record;
     } catch (error) {
-      logger.error('❌ Error validating user session:', error)
-      return null
+      logger.error('❌ 添加积分记录失败:', error);
+      return null;
     }
   }
 
-  // 🚫 使用户会话失效
-  async invalidateUserSession(sessionToken) {
+  /**
+   * 消耗积分
+   */
+  async consumeCredits(userId, amount, description, metadata = {}) {
     try {
-      await redis.del(`${this.userSessionPrefix}${sessionToken}`)
-      logger.info(`🚫 Invalidated session: ${sessionToken}`)
-    } catch (error) {
-      logger.error('❌ Error invalidating user session:', error)
-    }
-  }
-
-  // 🚫 使用户所有会话失效
-  async invalidateUserSessions(userId) {
-    try {
-      const client = redis.getClientSafe()
-      const pattern = `${this.userSessionPrefix}*`
-      const keys = await client.keys(pattern)
-
-      for (const key of keys) {
-        const sessionData = await client.get(key)
-        if (sessionData) {
-          const session = JSON.parse(sessionData)
-          if (session.userId === userId) {
-            await client.del(key)
-          }
-        }
-      }
-
-      logger.info(`🚫 Invalidated all sessions for user: ${userId}`)
-    } catch (error) {
-      logger.error('❌ Error invalidating user sessions:', error)
-    }
-  }
-
-  // 🗑️ 删除用户（软删除，标记为不活跃）
-  async deleteUser(userId) {
-    try {
-      const user = await this.getUserById(userId, false) // Skip usage calculation
+      const user = await User.findById(userId);
       if (!user) {
-        throw new Error('User not found')
+        return {
+          success: false,
+          error: 'User not found',
+          message: '用户不存在',
+        };
       }
 
-      // 软删除：标记为不活跃并添加删除时间戳
-      user.isActive = false
-      user.deletedAt = new Date().toISOString()
-      user.updatedAt = new Date().toISOString()
-
-      await redis.set(`${this.userPrefix}${userId}`, JSON.stringify(user))
-
-      // 删除所有会话
-      await this.invalidateUserSessions(userId)
-
-      // Disable all user's API keys when user is deleted
-      try {
-        const apiKeyService = require('./apiKeyService')
-        const result = await apiKeyService.disableUserApiKeys(userId)
-        logger.info(`🔑 Disabled ${result.count} API keys for deleted user: ${user.username}`)
-      } catch (error) {
-        logger.error('❌ Error disabling user API keys during user deletion:', error)
+      // 检查积分是否足够
+      if (user.credits < amount) {
+        return {
+          success: false,
+          error: 'Insufficient credits',
+          message: '积分不足',
+        };
       }
 
-      logger.info(`🗑️ Soft deleted user: ${user.username} (${userId})`)
-      return user
+      const balanceBefore = user.credits;
+      user.credits -= amount;
+      user.todayUsage += amount;
+      
+      await user.save();
+
+      // 记录消耗
+      await this.addCreditRecord({
+        userId: user._id,
+        type: 'usage',
+        amount: -amount,
+        balanceBefore,
+        balanceAfter: user.credits,
+        description,
+        ...metadata,
+      });
+
+      return {
+        success: true,
+        credits: user.credits,
+        todayUsage: user.todayUsage,
+      };
     } catch (error) {
-      logger.error('❌ Error deleting user:', error)
-      throw error
+      logger.error('❌ 消耗积分失败:', error);
+      return {
+        success: false,
+        error: 'Failed to consume credits',
+        message: '积分扣除失败',
+      };
     }
   }
 
-  // 📊 获取用户统计信息
-  async getUserStats() {
+  /**
+   * 添加积分
+   */
+  async addCredits(userId, amount, description, type = 'refill') {
     try {
-      const client = redis.getClientSafe()
-      const pattern = `${this.userPrefix}*`
-      const keys = await client.keys(pattern)
-
-      const stats = {
-        totalUsers: 0,
-        activeUsers: 0,
-        adminUsers: 0,
-        regularUsers: 0,
-        totalApiKeys: 0,
-        totalUsage: {
-          requests: 0,
-          inputTokens: 0,
-          outputTokens: 0,
-          totalCost: 0
-        }
+      const user = await User.findById(userId);
+      if (!user) {
+        return {
+          success: false,
+          error: 'User not found',
+          message: '用户不存在',
+        };
       }
 
-      for (const key of keys) {
-        const userData = await client.get(key)
-        if (userData) {
-          const user = JSON.parse(userData)
-          stats.totalUsers++
+      const balanceBefore = user.credits;
+      user.credits += amount;
+      
+      await user.save();
 
-          if (user.isActive) {
-            stats.activeUsers++
-          }
+      // 记录充值
+      await this.addCreditRecord({
+        userId: user._id,
+        type,
+        amount,
+        balanceBefore,
+        balanceAfter: user.credits,
+        description,
+      });
 
-          if (user.role === 'admin') {
-            stats.adminUsers++
-          } else {
-            stats.regularUsers++
-          }
-
-          // Calculate dynamic usage stats for each user
-          try {
-            const usageStats = await this.calculateUserUsageStats(user.id)
-            stats.totalApiKeys += usageStats.apiKeyCount
-            stats.totalUsage.requests += usageStats.totalUsage.requests
-            stats.totalUsage.inputTokens += usageStats.totalUsage.inputTokens
-            stats.totalUsage.outputTokens += usageStats.totalUsage.outputTokens
-            stats.totalUsage.totalCost += usageStats.totalUsage.totalCost
-          } catch (error) {
-            logger.error(`❌ Error calculating usage for user ${user.id} in stats:`, error)
-            // Fallback to stored values if calculation fails
-            stats.totalApiKeys += user.apiKeyCount || 0
-            stats.totalUsage.requests += user.totalUsage?.requests || 0
-            stats.totalUsage.inputTokens += user.totalUsage?.inputTokens || 0
-            stats.totalUsage.outputTokens += user.totalUsage?.outputTokens || 0
-            stats.totalUsage.totalCost += user.totalUsage?.totalCost || 0
-          }
-        }
-      }
-
-      return stats
+      return {
+        success: true,
+        credits: user.credits,
+      };
     } catch (error) {
-      logger.error('❌ Error getting user stats:', error)
-      throw error
+      logger.error('❌ 添加积分失败:', error);
+      return {
+        success: false,
+        error: 'Failed to add credits',
+        message: '积分充值失败',
+      };
     }
   }
 
-  // 🔄 转移匹配的API Keys给新用户
-  async transferMatchingApiKeys(user) {
+  /**
+   * OAuth登录/注册
+   */
+  async oauthLogin(provider, profile) {
     try {
-      const apiKeyService = require('./apiKeyService')
-      const { displayName, username, email } = user
+      const { id, email, name, avatar } = profile;
 
-      // 获取所有API Keys
-      const allApiKeys = await apiKeyService.getAllApiKeys()
+      // 查找是否已有此OAuth用户
+      let user = await User.findOne({
+        oauthProvider: provider,
+        oauthId: id,
+      });
 
-      // 找到没有用户ID的API Keys（即由Admin创建的）
-      const unownedApiKeys = allApiKeys.filter((key) => !key.userId || key.userId === '')
+      if (!user) {
+        // 尝试通过邮箱查找
+        user = await User.findOne({ email });
+        
+        if (user) {
+          // 绑定OAuth账号
+          user.oauthProvider = provider;
+          user.oauthId = id;
+          if (avatar) user.avatar = avatar;
+          await user.save();
+        } else {
+          // 创建新用户
+          user = new User({
+            username: `${provider}_${id}`,
+            email,
+            displayName: name || email,
+            avatar,
+            oauthProvider: provider,
+            oauthId: id,
+            role: 'user',
+            credits: 1000,
+            isEmailVerified: true, // OAuth用户默认邮箱已验证
+            subscription: {
+              planId: 'free',
+              planName: '免费版',
+              dailyCredits: 1000,
+              status: 'active',
+            },
+          });
 
-      if (unownedApiKeys.length === 0) {
-        logger.debug(`📝 No unowned API keys found for potential transfer to user: ${username}`)
-        return
-      }
+          user.generateInvitationCode();
+          await user.save();
 
-      // 构建匹配字符串数组（只考虑displayName、username、email，去除空值和重复值）
-      const matchStrings = new Set()
-      if (displayName) {
-        matchStrings.add(displayName.toLowerCase().trim())
-      }
-      if (username) {
-        matchStrings.add(username.toLowerCase().trim())
-      }
-      if (email) {
-        matchStrings.add(email.toLowerCase().trim())
-      }
+          // 记录赠送积分
+          await this.addCreditRecord({
+            userId: user._id,
+            type: 'gift',
+            amount: 1000,
+            balanceBefore: 0,
+            balanceAfter: 1000,
+            description: `${provider}登录注册赠送`,
+            source: `oauth_${provider}`,
+          });
 
-      const matchingKeys = []
-
-      // 查找名称匹配的API Keys（只进行完全匹配）
-      for (const apiKey of unownedApiKeys) {
-        const keyName = apiKey.name ? apiKey.name.toLowerCase().trim() : ''
-
-        // 检查API Key名称是否与用户信息完全匹配
-        for (const matchString of matchStrings) {
-          if (keyName === matchString) {
-            matchingKeys.push(apiKey)
-            break // 找到匹配后跳出内层循环
-          }
+          logger.info(`✅ OAuth新用户注册: ${provider} - ${email}`);
         }
       }
 
-      // 转移匹配的API Keys
-      let transferredCount = 0
-      for (const apiKey of matchingKeys) {
-        try {
-          await apiKeyService.updateApiKey(apiKey.id, {
-            userId: user.id,
-            userUsername: user.username,
-            createdBy: user.username
-          })
+      // 更新登录信息
+      user.lastLogin = Date.now();
+      await user.save();
 
-          transferredCount++
-          logger.info(`🔄 Transferred API key "${apiKey.name}" (${apiKey.id}) to user: ${username}`)
-        } catch (error) {
-          logger.error(`❌ Failed to transfer API key ${apiKey.id} to user ${username}:`, error)
-        }
-      }
+      // 生成Token
+      const token = this.generateToken(user);
 
-      if (transferredCount > 0) {
-        logger.success(
-          `🎉 Successfully transferred ${transferredCount} API key(s) to new user: ${username} (${displayName})`
-        )
-      } else if (matchingKeys.length === 0) {
-        logger.debug(`📝 No matching API keys found for user: ${username} (${displayName})`)
-      }
+      return {
+        success: true,
+        message: '登录成功',
+        token,
+        user: {
+          id: user._id,
+          username: user.username,
+          email: user.email,
+          displayName: user.displayName,
+          avatar: user.avatar,
+          role: user.role,
+          credits: user.credits,
+        },
+      };
     } catch (error) {
-      logger.error('❌ Error transferring matching API keys:', error)
-      // Don't throw error to prevent blocking user creation
+      logger.error(`❌ OAuth登录失败 (${provider}):`, error);
+      return {
+        success: false,
+        error: 'OAuth login failed',
+        message: 'OAuth登录失败',
+      };
     }
   }
 }
 
-module.exports = new UserService()
+module.exports = new UserService();

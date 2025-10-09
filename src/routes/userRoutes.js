@@ -1,7 +1,7 @@
 const express = require('express')
 const router = express.Router()
 const ldapService = require('../services/ldapService')
-const userService = require('../services/userService')
+const userServiceDb = require('../services/userService')
 const apiKeyService = require('../services/apiKeyService')
 const logger = require('../utils/logger')
 const config = require('../../config/config')
@@ -47,6 +47,98 @@ function initRateLimiters() {
   }
   return { ipRateLimiter, strictIpRateLimiter }
 }
+
+// 📝 用户注册端点
+router.post('/register', async (req, res) => {
+  try {
+    const { username, email, password } = req.body;
+    const clientIp = req.ip || req.connection.remoteAddress || 'unknown';
+
+    // 初始化速率限制器
+    const limiters = initRateLimiters();
+
+    // 检查IP速率限制
+    if (limiters.ipRateLimiter) {
+      try {
+        await limiters.ipRateLimiter.consume(clientIp);
+      } catch (rateLimiterRes) {
+        const retryAfter = Math.round(rateLimiterRes.msBeforeNext / 1000) || 900;
+        logger.security(`🚫 注册请求频率过高 IP: ${clientIp}`);
+        res.set('Retry-After', String(retryAfter));
+        return res.status(429).json({
+          error: 'Too many requests',
+          message: '请求过于频繁，请稍后重试'
+        });
+      }
+    }
+
+    // 验证必填字段
+    if (!username || !email || !password) {
+      return res.status(400).json({
+        error: 'Missing fields',
+        message: '用户名、邮箱和密码不能为空'
+      });
+    }
+
+    // 验证输入格式
+    try {
+      inputValidator.validateUsername(username);
+      inputValidator.validatePassword(password);
+      
+      // 简单的邮箱格式验证
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        throw new Error('邮箱格式不正确');
+      }
+    } catch (validationError) {
+      return res.status(400).json({
+        error: 'Invalid input',
+        message: validationError.message
+      });
+    }
+
+    // 调用数据库注册服务
+    const result = await userServiceDb.register({
+      username,
+      email,
+      password
+    });
+
+    if (!result.success) {
+      return res.status(400).json({
+        error: result.error,
+        message: result.message
+      });
+    }
+
+    // 注册成功，自动登录
+    const loginResult = await userServiceDb.login(username, password);
+    
+    if (loginResult.success) {
+      logger.info(`✅ 新用户注册并登录: ${username} from IP: ${clientIp}`);
+      
+      res.json({
+        success: true,
+        message: '注册成功',
+        token: loginResult.token,
+        user: loginResult.user
+      });
+    } else {
+      // 注册成功但登录失败（不太可能发生）
+      res.json({
+        success: true,
+        message: '注册成功，请登录',
+        user: result.user
+      });
+    }
+
+  } catch (error) {
+    logger.error('❌ 用户注册错误:', error);
+    res.status(500).json({
+      error: 'Registration error',
+      message: '注册失败，请稍后重试'
+    });
+  }
+});
 
 // 🔐 用户登录端点
 router.post('/login', async (req, res) => {
