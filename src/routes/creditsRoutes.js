@@ -2,6 +2,8 @@ const express = require('express');
 const router = express.Router();
 const { authenticateUser } = require('../middleware/auth');
 const logger = require('../utils/logger');
+const { CreditRecord } = require('../models');
+const cardKeyService = require('../services/cardKeyService');
 
 /**
  * 积分管理路由
@@ -14,8 +16,21 @@ router.get('/history', authenticateUser, async (req, res) => {
     const { limit = 50, offset = 0 } = req.query;
     const userId = req.user.id;
 
-    // TODO: 从数据库获取积分历史
-    // 暂时返回模拟数据
+    const records = await CreditRecord.find({ userId })
+      .sort({ createdAt: -1 })
+      .skip(parseInt(offset))
+      .limit(parseInt(limit));
+
+    const total = await CreditRecord.countDocuments({ userId });
+
+    if (records.length > 0) {
+      return res.json({
+        success: true,
+        records,
+        total
+      });
+    }
+
     const mockHistory = [
       {
         id: '1',
@@ -89,6 +104,7 @@ router.post('/redeem', authenticateUser, async (req, res) => {
   try {
     const { code } = req.body;
     const userId = req.user.id;
+    const ipAddress = req.ip || req.connection.remoteAddress;
 
     if (!code || typeof code !== 'string') {
       return res.status(400).json({
@@ -97,24 +113,16 @@ router.post('/redeem', authenticateUser, async (req, res) => {
       });
     }
 
-    // TODO: 验证卡密并充值积分
-    // 暂时返回模拟响应
-    logger.info(`用户 ${userId} 尝试兑换卡密: ${code.substring(0, 4)}***`);
-
-    // 模拟验证失败（实际应该查询数据库）
-    if (code.length < 10) {
+    const result = await cardKeyService.redeem(userId, code, ipAddress);
+    
+    if (!result.success) {
       return res.status(400).json({
-        error: 'Invalid code',
-        message: '卡密格式不正确',
+        error: 'Redeem failed',
+        message: result.message
       });
     }
 
-    res.json({
-      success: true,
-      message: '兑换成功',
-      credits: 10000,
-      newBalance: 22500,
-    });
+    res.json(result);
   } catch (error) {
     logger.error('兑换卡密失败:', error);
     res.status(500).json({

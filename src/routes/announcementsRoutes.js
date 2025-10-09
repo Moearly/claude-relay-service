@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { authenticateUser, requireAdmin } = require('../middleware/auth');
 const logger = require('../utils/logger');
+const announcementService = require('../services/announcementService');
 
 /**
  * 公告管理路由
@@ -13,8 +14,12 @@ router.get('/', async (req, res) => {
   try {
     const { limit = 50, offset = 0, category } = req.query;
 
-    // TODO: 从数据库获取公告列表
-    // 暂时返回模拟数据
+    const result = await announcementService.getList({ limit, offset, category });
+    
+    if (result.success && result.announcements.length > 0) {
+      return res.json(result);
+    }
+
     const mockAnnouncements = [
       {
         id: '1',
