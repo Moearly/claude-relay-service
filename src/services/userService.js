@@ -1,7 +1,7 @@
-const { User, CreditRecord } = require('../models');
-const logger = require('../utils/logger');
-const jwt = require('jsonwebtoken');
-const config = require('../../config/config');
+const { User, CreditRecord } = require('../models')
+const logger = require('../utils/logger')
+const jwt = require('jsonwebtoken')
+const config = require('../../config/config')
 
 /**
  * 用户服务
@@ -12,26 +12,26 @@ class UserService {
    */
   async register(userData) {
     try {
-      const { username, email, password } = userData;
+      const { username, email, password } = userData
 
       // 检查用户名是否已存在
-      const existingUsername = await User.findOne({ username });
+      const existingUsername = await User.findOne({ username })
       if (existingUsername) {
         return {
           success: false,
           error: 'Username already exists',
-          message: '用户名已被使用',
-        };
+          message: '用户名已被使用'
+        }
       }
 
       // 检查邮箱是否已存在
-      const existingEmail = await User.findOne({ email });
+      const existingEmail = await User.findOne({ email })
       if (existingEmail) {
         return {
           success: false,
           error: 'Email already exists',
-          message: '邮箱已被注册',
-        };
+          message: '邮箱已被注册'
+        }
       }
 
       // 创建新用户
@@ -46,14 +46,14 @@ class UserService {
           planId: 'free',
           planName: '免费版',
           dailyCredits: 1000,
-          status: 'active',
-        },
-      });
+          status: 'active'
+        }
+      })
 
       // 生成邀请码
-      user.generateInvitationCode();
+      user.generateInvitationCode()
 
-      await user.save();
+      await user.save()
 
       // 记录赠送积分
       await this.addCreditRecord({
@@ -63,10 +63,10 @@ class UserService {
         balanceBefore: 0,
         balanceAfter: 1000,
         description: '新用户注册赠送',
-        source: 'registration',
-      });
+        source: 'registration'
+      })
 
-      logger.info(`✅ 新用户注册成功: ${username} (${email})`);
+      logger.info(`✅ 新用户注册成功: ${username} (${email})`)
 
       return {
         success: true,
@@ -77,16 +77,16 @@ class UserService {
           email: user.email,
           displayName: user.displayName,
           credits: user.credits,
-          invitationCode: user.invitationCode,
-        },
-      };
+          invitationCode: user.invitationCode
+        }
+      }
     } catch (error) {
-      logger.error('❌ 用户注册失败:', error);
+      logger.error('❌ 用户注册失败:', error)
       return {
         success: false,
         error: 'Registration failed',
-        message: '注册失败，请稍后重试',
-      };
+        message: '注册失败，请稍后重试'
+      }
     }
   }
 
@@ -97,62 +97,62 @@ class UserService {
     try {
       // 查找用户
       const user = await User.findOne({
-        $or: [{ username }, { email: username }],
-      });
+        $or: [{ username }, { email: username }]
+      })
 
       if (!user) {
         return {
           success: false,
           error: 'Invalid credentials',
-          message: '用户名或密码错误',
-        };
+          message: '用户名或密码错误'
+        }
       }
 
       // 检查账户是否被锁定
       if (user.lockUntil && user.lockUntil > Date.now()) {
-        const minutesLeft = Math.ceil((user.lockUntil - Date.now()) / 60000);
+        const minutesLeft = Math.ceil((user.lockUntil - Date.now()) / 60000)
         return {
           success: false,
           error: 'Account locked',
-          message: `账户已被锁定，请在 ${minutesLeft} 分钟后重试`,
-        };
+          message: `账户已被锁定，请在 ${minutesLeft} 分钟后重试`
+        }
       }
 
       // 验证密码
-      const isMatch = await user.comparePassword(password);
+      const isMatch = await user.comparePassword(password)
       if (!isMatch) {
         // 增加失败次数
-        user.failedLoginAttempts += 1;
-        
+        user.failedLoginAttempts += 1
+
         // 如果失败次数超过5次，锁定账户30分钟
         if (user.failedLoginAttempts >= 5) {
-          user.lockUntil = Date.now() + 30 * 60 * 1000;
-          logger.warn(`⚠️ 账户被锁定: ${username} (失败次数: ${user.failedLoginAttempts})`);
+          user.lockUntil = Date.now() + 30 * 60 * 1000
+          logger.warn(`⚠️ 账户被锁定: ${username} (失败次数: ${user.failedLoginAttempts})`)
         }
-        
-        await user.save();
-        
+
+        await user.save()
+
         return {
           success: false,
           error: 'Invalid credentials',
-          message: '用户名或密码错误',
-        };
+          message: '用户名或密码错误'
+        }
       }
 
       // 重置失败次数
-      user.failedLoginAttempts = 0;
-      user.lockUntil = null;
-      user.lastLogin = Date.now();
-      
+      user.failedLoginAttempts = 0
+      user.lockUntil = null
+      user.lastLogin = Date.now()
+
       // 重置每日使用量（如果需要）
-      user.resetDailyUsage();
-      
-      await user.save();
+      user.resetDailyUsage()
+
+      await user.save()
 
       // 生成Token
-      const token = this.generateToken(user);
+      const token = this.generateToken(user)
 
-      logger.info(`✅ 用户登录成功: ${username}`);
+      logger.info(`✅ 用户登录成功: ${username}`)
 
       return {
         success: true,
@@ -165,16 +165,16 @@ class UserService {
           displayName: user.displayName,
           role: user.role,
           credits: user.credits,
-          subscription: user.subscription,
-        },
-      };
+          subscription: user.subscription
+        }
+      }
     } catch (error) {
-      logger.error('❌ 用户登录失败:', error);
+      logger.error('❌ 用户登录失败:', error)
       return {
         success: false,
         error: 'Login failed',
-        message: '登录失败，请稍后重试',
-      };
+        message: '登录失败，请稍后重试'
+      }
     }
   }
 
@@ -186,13 +186,14 @@ class UserService {
       id: user._id,
       username: user.username,
       email: user.email,
-      role: user.role,
-    };
+      role: user.role
+    }
 
-    const secret = config.jwt?.secret || process.env.JWT_SECRET || 'your-secret-key-change-in-production';
-    const expiresIn = config.jwt?.expiresIn || '7d';
+    const secret =
+      config.jwt?.secret || process.env.JWT_SECRET || 'your-secret-key-change-in-production'
+    const expiresIn = config.jwt?.expiresIn || '7d'
 
-    return jwt.sign(payload, secret, { expiresIn });
+    return jwt.sign(payload, secret, { expiresIn })
   }
 
   /**
@@ -200,10 +201,11 @@ class UserService {
    */
   verifyToken(token) {
     try {
-      const secret = config.jwt?.secret || process.env.JWT_SECRET || 'your-secret-key-change-in-production';
-      return jwt.verify(token, secret);
+      const secret =
+        config.jwt?.secret || process.env.JWT_SECRET || 'your-secret-key-change-in-production'
+      return jwt.verify(token, secret)
     } catch (error) {
-      return null;
+      return null
     }
   }
 
@@ -212,19 +214,43 @@ class UserService {
    */
   async getUserById(userId) {
     try {
-      const user = await User.findById(userId);
+      const user = await User.findById(userId)
       if (!user) {
-        return null;
+        return null
       }
 
       // 重置每日使用量
-      user.resetDailyUsage();
-      await user.save();
+      user.resetDailyUsage()
+      await user.save()
 
-      return user;
+      return user
     } catch (error) {
-      logger.error('❌ 获取用户信息失败:', error);
-      return null;
+      logger.error('❌ 获取用户信息失败:', error)
+      return null
+    }
+  }
+
+  /**
+   * 根据ID查找用户
+   */
+  async findUserById(userId) {
+    try {
+      return await User.findById(userId)
+    } catch (error) {
+      logger.error('❌ 查找用户失败:', error)
+      return null
+    }
+  }
+
+  /**
+   * 根据邮箱查找用户
+   */
+  async findUserByEmail(email) {
+    try {
+      return await User.findOne({ email })
+    } catch (error) {
+      logger.error('❌ 查找用户失败:', error)
+      return null
     }
   }
 
@@ -237,19 +263,19 @@ class UserService {
         userId,
         { $set: updates, updatedAt: Date.now() },
         { new: true }
-      );
+      )
 
       return {
         success: true,
-        user,
-      };
+        user
+      }
     } catch (error) {
-      logger.error('❌ 更新用户信息失败:', error);
+      logger.error('❌ 更新用户信息失败:', error)
       return {
         success: false,
         error: 'Update failed',
-        message: '更新失败',
-      };
+        message: '更新失败'
+      }
     }
   }
 
@@ -258,12 +284,12 @@ class UserService {
    */
   async addCreditRecord(recordData) {
     try {
-      const record = new CreditRecord(recordData);
-      await record.save();
-      return record;
+      const record = new CreditRecord(recordData)
+      await record.save()
+      return record
     } catch (error) {
-      logger.error('❌ 添加积分记录失败:', error);
-      return null;
+      logger.error('❌ 添加积分记录失败:', error)
+      return null
     }
   }
 
@@ -272,13 +298,13 @@ class UserService {
    */
   async consumeCredits(userId, amount, description, metadata = {}) {
     try {
-      const user = await User.findById(userId);
+      const user = await User.findById(userId)
       if (!user) {
         return {
           success: false,
           error: 'User not found',
-          message: '用户不存在',
-        };
+          message: '用户不存在'
+        }
       }
 
       // 检查积分是否足够
@@ -286,15 +312,15 @@ class UserService {
         return {
           success: false,
           error: 'Insufficient credits',
-          message: '积分不足',
-        };
+          message: '积分不足'
+        }
       }
 
-      const balanceBefore = user.credits;
-      user.credits -= amount;
-      user.todayUsage += amount;
-      
-      await user.save();
+      const balanceBefore = user.credits
+      user.credits -= amount
+      user.todayUsage += amount
+
+      await user.save()
 
       // 记录消耗
       await this.addCreditRecord({
@@ -304,21 +330,21 @@ class UserService {
         balanceBefore,
         balanceAfter: user.credits,
         description,
-        ...metadata,
-      });
+        ...metadata
+      })
 
       return {
         success: true,
         credits: user.credits,
-        todayUsage: user.todayUsage,
-      };
+        todayUsage: user.todayUsage
+      }
     } catch (error) {
-      logger.error('❌ 消耗积分失败:', error);
+      logger.error('❌ 消耗积分失败:', error)
       return {
         success: false,
         error: 'Failed to consume credits',
-        message: '积分扣除失败',
-      };
+        message: '积分扣除失败'
+      }
     }
   }
 
@@ -327,19 +353,19 @@ class UserService {
    */
   async addCredits(userId, amount, description, type = 'refill') {
     try {
-      const user = await User.findById(userId);
+      const user = await User.findById(userId)
       if (!user) {
         return {
           success: false,
           error: 'User not found',
-          message: '用户不存在',
-        };
+          message: '用户不存在'
+        }
       }
 
-      const balanceBefore = user.credits;
-      user.credits += amount;
-      
-      await user.save();
+      const balanceBefore = user.credits
+      user.credits += amount
+
+      await user.save()
 
       // 记录充值
       await this.addCreditRecord({
@@ -348,20 +374,20 @@ class UserService {
         amount,
         balanceBefore,
         balanceAfter: user.credits,
-        description,
-      });
+        description
+      })
 
       return {
         success: true,
-        credits: user.credits,
-      };
+        credits: user.credits
+      }
     } catch (error) {
-      logger.error('❌ 添加积分失败:', error);
+      logger.error('❌ 添加积分失败:', error)
       return {
         success: false,
         error: 'Failed to add credits',
-        message: '积分充值失败',
-      };
+        message: '积分充值失败'
+      }
     }
   }
 
@@ -370,24 +396,26 @@ class UserService {
    */
   async oauthLogin(provider, profile) {
     try {
-      const { id, email, name, avatar } = profile;
+      const { id, email, name, avatar } = profile
 
       // 查找是否已有此OAuth用户
       let user = await User.findOne({
         oauthProvider: provider,
-        oauthId: id,
-      });
+        oauthId: id
+      })
 
       if (!user) {
         // 尝试通过邮箱查找
-        user = await User.findOne({ email });
-        
+        user = await User.findOne({ email })
+
         if (user) {
           // 绑定OAuth账号
-          user.oauthProvider = provider;
-          user.oauthId = id;
-          if (avatar) user.avatar = avatar;
-          await user.save();
+          user.oauthProvider = provider
+          user.oauthId = id
+          if (avatar) {
+            user.avatar = avatar
+          }
+          await user.save()
         } else {
           // 创建新用户
           user = new User({
@@ -404,12 +432,12 @@ class UserService {
               planId: 'free',
               planName: '免费版',
               dailyCredits: 1000,
-              status: 'active',
-            },
-          });
+              status: 'active'
+            }
+          })
 
-          user.generateInvitationCode();
-          await user.save();
+          user.generateInvitationCode()
+          await user.save()
 
           // 记录赠送积分
           await this.addCreditRecord({
@@ -419,19 +447,19 @@ class UserService {
             balanceBefore: 0,
             balanceAfter: 1000,
             description: `${provider}登录注册赠送`,
-            source: `oauth_${provider}`,
-          });
+            source: `oauth_${provider}`
+          })
 
-          logger.info(`✅ OAuth新用户注册: ${provider} - ${email}`);
+          logger.info(`✅ OAuth新用户注册: ${provider} - ${email}`)
         }
       }
 
       // 更新登录信息
-      user.lastLogin = Date.now();
-      await user.save();
+      user.lastLogin = Date.now()
+      await user.save()
 
       // 生成Token
-      const token = this.generateToken(user);
+      const token = this.generateToken(user)
 
       return {
         success: true,
@@ -444,18 +472,18 @@ class UserService {
           displayName: user.displayName,
           avatar: user.avatar,
           role: user.role,
-          credits: user.credits,
-        },
-      };
+          credits: user.credits
+        }
+      }
     } catch (error) {
-      logger.error(`❌ OAuth登录失败 (${provider}):`, error);
+      logger.error(`❌ OAuth登录失败 (${provider}):`, error)
       return {
         success: false,
         error: 'OAuth login failed',
-        message: 'OAuth登录失败',
-      };
+        message: 'OAuth登录失败'
+      }
     }
   }
 }
 
-module.exports = new UserService();
+module.exports = new UserService()

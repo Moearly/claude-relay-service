@@ -940,4 +940,222 @@ router.post('/api/user-model-stats', async (req, res) => {
   }
 })
 
+// 📊 获取最近使用记录接口 (用于用户控制台)
+router.get('/recent', async (req, res) => {
+  try {
+    const { limit = 10 } = req.query
+    const token = req.headers.authorization?.replace('Bearer ', '')
+
+    if (!token) {
+      return res.status(401).json({
+        error: 'Unauthorized',
+        message: 'Authentication token required'
+      })
+    }
+
+    // 验证 JWT token
+    const jwt = require('jsonwebtoken')
+    const config = require('../../config/config')
+    let userId
+
+    try {
+      const decoded = jwt.verify(token, config.security.jwtSecret)
+      userId = decoded.id || decoded.userId
+    } catch (error) {
+      return res.status(401).json({
+        error: 'Invalid token',
+        message: 'Authentication token is invalid or expired'
+      })
+    }
+
+    // 获取用户的所有 API Keys
+    const apiKeyService = require('../services/apiKeyService')
+    const userApiKeys = await apiKeyService.getUserApiKeys(userId, false)
+
+    if (userApiKeys.length === 0) {
+      return res.json({
+        success: true,
+        records: []
+      })
+    }
+
+    // 从 Redis 获取每个 API Key 的最近使用记录
+    const client = redis.getClientSafe()
+    const allRecords = []
+
+    for (const apiKey of userApiKeys) {
+      const keyId = apiKey._id.toString()
+
+      // 获取最近的使用记录 (从 Redis sorted sets 或 lists 中获取)
+      // 这里我们从统计数据中构建记录
+      const usage = await redis.getUsageStats(keyId)
+      const costStats = await redis.getCostStats(keyId)
+
+      // 如果有今日使用记录，添加到结果中
+      if (usage.daily && Object.keys(usage.daily).length > 0) {
+        const modelStats = usage.daily
+        Object.keys(modelStats).forEach((model) => {
+          if (modelStats[model].requestCount > 0) {
+            allRecords.push({
+              apiKeyId: keyId,
+              apiKeyName: apiKey.name,
+              model,
+              description: `API 调用 - ${model}`,
+              requestCount: modelStats[model].requestCount,
+              inputTokens: modelStats[model].inputTokens || 0,
+              outputTokens: modelStats[model].outputTokens || 0,
+              cost: modelStats[model].cost || 0,
+              timestamp: new Date().toISOString(), // 使用当天时间
+              date: new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })
+            })
+          }
+        })
+      }
+    }
+
+    // 按时间排序并限制数量
+    allRecords.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+    const limitedRecords = allRecords.slice(0, parseInt(limit))
+
+    res.json({
+      success: true,
+      records: limitedRecords,
+      total: allRecords.length
+    })
+  } catch (error) {
+    logger.error('❌ Failed to get recent usage:', error)
+    res.status(500).json({
+      error: 'Internal server error',
+      message: 'Failed to retrieve recent usage records'
+    })
+  }
+})
+
+// 📊 获取统计汇总接口 (用于用户控制台)
+router.get('/summary', async (req, res) => {
+  try {
+    const token = req.headers.authorization?.replace('Bearer ', '')
+
+    if (!token) {
+      return res.status(401).json({
+        error: 'Unauthorized',
+        message: 'Authentication token required'
+      })
+    }
+
+    // 验证 JWT token
+    const jwt = require('jsonwebtoken')
+    const config = require('../../config/config')
+    let userId
+
+    try {
+      const decoded = jwt.verify(token, config.security.jwtSecret)
+      userId = decoded.id || decoded.userId
+    } catch (error) {
+      return res.status(401).json({
+        error: 'Invalid token',
+        message: 'Authentication token is invalid or expired'
+      })
+    }
+
+    // 获取用户的所有 API Keys
+    const apiKeyService = require('../services/apiKeyService')
+    const userApiKeys = await apiKeyService.getUserApiKeys(userId, false)
+
+    if (userApiKeys.length === 0) {
+      return res.json({
+        success: true,
+        summary: {
+          totalRequests: 0,
+          totalInputTokens: 0,
+          totalOutputTokens: 0,
+          totalCost: 0,
+          todayRequests: 0,
+          todayInputTokens: 0,
+          todayOutputTokens: 0,
+          todayCost: 0,
+          monthRequests: 0,
+          monthInputTokens: 0,
+          monthOutputTokens: 0,
+          monthCost: 0
+        }
+      })
+    }
+
+    // 汇总所有 API Key 的统计数据
+    let totalRequests = 0
+    let totalInputTokens = 0
+    let totalOutputTokens = 0
+    let totalCost = 0
+    let todayRequests = 0
+    let todayInputTokens = 0
+    let todayOutputTokens = 0
+    let todayCost = 0
+    let monthRequests = 0
+    let monthInputTokens = 0
+    let monthOutputTokens = 0
+    let monthCost = 0
+
+    for (const apiKey of userApiKeys) {
+      const keyId = apiKey._id.toString()
+      const usage = await redis.getUsageStats(keyId)
+      const costStats = await redis.getCostStats(keyId)
+
+      // 汇总总计
+      if (usage.total) {
+        Object.values(usage.total).forEach((modelData) => {
+          totalRequests += modelData.requestCount || 0
+          totalInputTokens += modelData.inputTokens || 0
+          totalOutputTokens += modelData.outputTokens || 0
+        })
+      }
+      totalCost += parseFloat(costStats.total || 0)
+
+      // 汇总今日
+      if (usage.daily) {
+        Object.values(usage.daily).forEach((modelData) => {
+          todayRequests += modelData.requestCount || 0
+          todayInputTokens += modelData.inputTokens || 0
+          todayOutputTokens += modelData.outputTokens || 0
+        })
+      }
+      todayCost += parseFloat(costStats.daily || 0)
+
+      // 汇总本月
+      if (usage.monthly) {
+        Object.values(usage.monthly).forEach((modelData) => {
+          monthRequests += modelData.requestCount || 0
+          monthInputTokens += modelData.inputTokens || 0
+          monthOutputTokens += modelData.outputTokens || 0
+        })
+      }
+      monthCost += parseFloat(costStats.monthly || 0)
+    }
+
+    res.json({
+      success: true,
+      summary: {
+        totalRequests,
+        totalInputTokens,
+        totalOutputTokens,
+        totalCost: totalCost.toFixed(6),
+        todayRequests,
+        todayInputTokens,
+        todayOutputTokens,
+        todayCost: todayCost.toFixed(6),
+        monthRequests,
+        monthInputTokens,
+        monthOutputTokens,
+        monthCost: monthCost.toFixed(6)
+      }
+    })
+  } catch (error) {
+    logger.error('❌ Failed to get usage summary:', error)
+    res.status(500).json({
+      error: 'Internal server error',
+      message: 'Failed to retrieve usage summary'
+    })
+  }
+})
+
 module.exports = router

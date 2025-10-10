@@ -1,14 +1,14 @@
-const mongoose = require('mongoose');
-const logger = require('../utils/logger');
-const config = require('../../config/config');
+const mongoose = require('mongoose')
+const logger = require('../utils/logger')
+const config = require('../../config/config')
 
 /**
  * 数据库连接管理
  */
 class Database {
   constructor() {
-    this.connection = null;
-    this.isConnected = false;
+    this.connection = null
+    this.isConnected = false
   }
 
   /**
@@ -16,40 +16,43 @@ class Database {
    */
   async connect() {
     if (this.isConnected) {
-      logger.info('📊 Database already connected');
-      return this.connection;
+      logger.info('📊 Database already connected')
+      return this.connection
     }
 
     try {
-      const mongoUri = config.database?.mongoUri || process.env.MONGODB_URI || 'mongodb://localhost:27017/claude-relay';
-      
-      logger.info('🔄 Connecting to MongoDB...');
-      
+      const mongoUri =
+        config.database?.mongoUri ||
+        process.env.MONGODB_URI ||
+        'mongodb://localhost:27017/claude-relay'
+
+      logger.info('🔄 Connecting to MongoDB...')
+
       this.connection = await mongoose.connect(mongoUri, {
         useNewUrlParser: true,
         useUnifiedTopology: true,
-        serverSelectionTimeoutMS: 5000,
-      });
+        serverSelectionTimeoutMS: 5000
+      })
 
-      this.isConnected = true;
-      logger.success('✅ MongoDB connected successfully');
+      this.isConnected = true
+      logger.success('✅ MongoDB connected successfully')
 
       // 监听连接事件
       mongoose.connection.on('error', (err) => {
-        logger.error('❌ MongoDB connection error:', err);
-        this.isConnected = false;
-      });
+        logger.error('❌ MongoDB connection error:', err)
+        this.isConnected = false
+      })
 
       mongoose.connection.on('disconnected', () => {
-        logger.warn('⚠️ MongoDB disconnected');
-        this.isConnected = false;
-      });
+        logger.warn('⚠️ MongoDB disconnected')
+        this.isConnected = false
+      })
 
-      return this.connection;
+      return this.connection
     } catch (error) {
-      logger.error('❌ Failed to connect to MongoDB:', error);
-      this.isConnected = false;
-      throw error;
+      logger.error('❌ Failed to connect to MongoDB:', error)
+      this.isConnected = false
+      throw error
     }
   }
 
@@ -58,16 +61,16 @@ class Database {
    */
   async disconnect() {
     if (!this.isConnected) {
-      return;
+      return
     }
 
     try {
-      await mongoose.disconnect();
-      this.isConnected = false;
-      logger.info('📊 MongoDB disconnected');
+      await mongoose.disconnect()
+      this.isConnected = false
+      logger.info('📊 MongoDB disconnected')
     } catch (error) {
-      logger.error('❌ Error disconnecting from MongoDB:', error);
-      throw error;
+      logger.error('❌ Error disconnecting from MongoDB:', error)
+      throw error
     }
   }
 
@@ -79,11 +82,10 @@ class Database {
       isConnected: this.isConnected,
       readyState: mongoose.connection.readyState,
       host: mongoose.connection.host,
-      name: mongoose.connection.name,
-    };
+      name: mongoose.connection.name
+    }
   }
 }
 
 // 导出单例
-module.exports = new Database();
-
+module.exports = new Database()

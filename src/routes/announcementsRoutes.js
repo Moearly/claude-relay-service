@@ -1,8 +1,8 @@
-const express = require('express');
-const router = express.Router();
-const { authenticateUser, requireAdmin } = require('../middleware/auth');
-const logger = require('../utils/logger');
-const announcementService = require('../services/announcementService');
+const express = require('express')
+const router = express.Router()
+const { authenticateUser, requireAdmin } = require('../middleware/auth')
+const logger = require('../utils/logger')
+const announcementService = require('../services/announcementService')
 
 /**
  * 公告管理路由
@@ -12,12 +12,12 @@ const announcementService = require('../services/announcementService');
 // 获取公告列表（公开接口，无需认证）
 router.get('/', async (req, res) => {
   try {
-    const { limit = 50, offset = 0, category } = req.query;
+    const { limit = 50, offset = 0, category } = req.query
 
-    const result = await announcementService.getList({ limit, offset, category });
-    
+    const result = await announcementService.getList({ limit, offset, category })
+
     if (result.success && result.announcements.length > 0) {
-      return res.json(result);
+      return res.json(result)
     }
 
     const mockAnnouncements = [
@@ -35,7 +35,7 @@ router.get('/', async (req, res) => {
         date: '2025年10月2日',
         createdAt: '2025-10-02T00:00:00Z',
         category: 'important',
-        status: 'published',
+        status: 'published'
       },
       {
         id: '2',
@@ -52,7 +52,7 @@ router.get('/', async (req, res) => {
         date: '2025年10月1日',
         createdAt: '2025-10-01T00:00:00Z',
         category: 'update',
-        status: 'published',
+        status: 'published'
       },
       {
         id: '3',
@@ -70,33 +70,33 @@ router.get('/', async (req, res) => {
         date: '2025年9月29日',
         createdAt: '2025-09-29T00:00:00Z',
         category: 'tutorial',
-        status: 'published',
-      },
-    ];
+        status: 'published'
+      }
+    ]
 
-    let filtered = mockAnnouncements;
+    let filtered = mockAnnouncements
     if (category) {
-      filtered = filtered.filter(a => a.category === category);
+      filtered = filtered.filter((a) => a.category === category)
     }
 
     res.json({
       success: true,
       announcements: filtered.slice(offset, offset + limit),
-      total: filtered.length,
-    });
+      total: filtered.length
+    })
   } catch (error) {
-    logger.error('获取公告列表失败:', error);
+    logger.error('获取公告列表失败:', error)
     res.status(500).json({
       error: 'Internal server error',
-      message: '获取公告列表失败',
-    });
+      message: '获取公告列表失败'
+    })
   }
-});
+})
 
 // 获取单个公告详情
 router.get('/:id', async (req, res) => {
   try {
-    const { id } = req.params;
+    const { id } = req.params
 
     // TODO: 从数据库获取公告详情
     res.json({
@@ -106,33 +106,33 @@ router.get('/:id', async (req, res) => {
       content: '公告内容',
       author: '管理员',
       createdAt: new Date().toISOString(),
-      category: 'update',
-    });
+      category: 'update'
+    })
   } catch (error) {
-    logger.error('获取公告详情失败:', error);
+    logger.error('获取公告详情失败:', error)
     res.status(500).json({
       error: 'Internal server error',
-      message: '获取公告详情失败',
-    });
+      message: '获取公告详情失败'
+    })
   }
-});
+})
 
 // 创建公告（管理员）
 router.post('/', authenticateUser, requireAdmin, async (req, res) => {
   try {
-    const { title, content, category } = req.body;
-    const author = req.user.username;
+    const { title, content, category } = req.body
+    const author = req.user.username
 
     if (!title || !content) {
       return res.status(400).json({
         error: 'Invalid input',
-        message: '标题和内容不能为空',
-      });
+        message: '标题和内容不能为空'
+      })
     }
 
     // TODO: 保存到数据库
-    const announcementId = 'ANN' + Date.now();
-    logger.info(`管理员 ${author} 创建公告: ${title}`);
+    const announcementId = `ANN${Date.now()}`
+    logger.info(`管理员 ${author} 创建公告: ${title}`)
 
     res.json({
       success: true,
@@ -142,26 +142,26 @@ router.post('/', authenticateUser, requireAdmin, async (req, res) => {
       content,
       category: category || 'update',
       author,
-      createdAt: new Date().toISOString(),
-    });
+      createdAt: new Date().toISOString()
+    })
   } catch (error) {
-    logger.error('创建公告失败:', error);
+    logger.error('创建公告失败:', error)
     res.status(500).json({
       error: 'Internal server error',
-      message: '创建公告失败',
-    });
+      message: '创建公告失败'
+    })
   }
-});
+})
 
 // 更新公告（管理员）
 router.put('/:id', authenticateUser, requireAdmin, async (req, res) => {
   try {
-    const { id } = req.params;
-    const { title, content, category, status } = req.body;
-    const author = req.user.username;
+    const { id } = req.params
+    const { title, content, category, status } = req.body
+    const author = req.user.username
 
     // TODO: 更新数据库
-    logger.info(`管理员 ${author} 更新公告: ${id}`);
+    logger.info(`管理员 ${author} 更新公告: ${id}`)
 
     res.json({
       success: true,
@@ -171,38 +171,37 @@ router.put('/:id', authenticateUser, requireAdmin, async (req, res) => {
       content,
       category,
       status,
-      updatedAt: new Date().toISOString(),
-    });
+      updatedAt: new Date().toISOString()
+    })
   } catch (error) {
-    logger.error('更新公告失败:', error);
+    logger.error('更新公告失败:', error)
     res.status(500).json({
       error: 'Internal server error',
-      message: '更新公告失败',
-    });
+      message: '更新公告失败'
+    })
   }
-});
+})
 
 // 删除公告（管理员）
 router.delete('/:id', authenticateUser, requireAdmin, async (req, res) => {
   try {
-    const { id } = req.params;
-    const author = req.user.username;
+    const { id } = req.params
+    const author = req.user.username
 
     // TODO: 从数据库删除
-    logger.info(`管理员 ${author} 删除公告: ${id}`);
+    logger.info(`管理员 ${author} 删除公告: ${id}`)
 
     res.json({
       success: true,
-      message: '公告删除成功',
-    });
+      message: '公告删除成功'
+    })
   } catch (error) {
-    logger.error('删除公告失败:', error);
+    logger.error('删除公告失败:', error)
     res.status(500).json({
       error: 'Internal server error',
-      message: '删除公告失败',
-    });
+      message: '删除公告失败'
+    })
   }
-});
+})
 
-module.exports = router;
-
+module.exports = router

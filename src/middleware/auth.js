@@ -823,7 +823,16 @@ const corsMiddleware = (req, res, next) => {
     'http://localhost:3000',
     'https://localhost:3000',
     'http://127.0.0.1:3000',
-    'https://127.0.0.1:3000'
+    'https://127.0.0.1:3000',
+    'http://localhost:3001',
+    'https://localhost:3001',
+    'http://127.0.0.1:3001',
+    'https://127.0.0.1:3001',
+    // 新的端口配置
+    'http://localhost:18080',
+    'http://localhost:19090',
+    'http://127.0.0.1:18080',
+    'http://127.0.0.1:19090'
   ]
 
   // 🆕 检查是否为Chrome插件请求

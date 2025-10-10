@@ -28,6 +28,7 @@ const webhookRoutes = require('./routes/webhook')
 const creditsRoutes = require('./routes/creditsRoutes')
 const subscriptionRoutes = require('./routes/subscriptionRoutes')
 const announcementsRoutes = require('./routes/announcementsRoutes')
+const invoiceRoutes = require('./routes/invoiceRoutes')
 
 // Import middleware
 const {
@@ -52,6 +53,12 @@ class Application {
       logger.info('🔄 Connecting to Redis...')
       await redis.connect()
       logger.success('✅ Redis connected successfully')
+
+      // 🔗 连接MongoDB (如果启用)
+      if (process.env.MONGODB_ENABLED === 'true') {
+        const database = require('./models/database')
+        await database.connect()
+      }
 
       // 💰 初始化价格服务
       logger.info('🔄 Initializing pricing service...')
@@ -262,6 +269,7 @@ class Application {
       // 💰 商业化功能路由
       this.app.use('/users/credits', creditsRoutes)
       this.app.use('/users/subscription', subscriptionRoutes)
+      this.app.use('/users/invoices', invoiceRoutes)
       this.app.use('/announcements', announcementsRoutes)
       // Gemini 路由：同时支持标准格式和原有格式
       this.app.use('/gemini', standardGeminiRoutes) // 标准 Gemini API 格式路由

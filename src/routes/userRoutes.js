@@ -9,6 +9,7 @@ const inputValidator = require('../utils/inputValidator')
 const { RateLimiterRedis } = require('rate-limiter-flexible')
 const redis = require('../models/redis')
 const { authenticateUser, authenticateUserOrAdmin, requireAdmin } = require('../middleware/auth')
+const { authenticateUserDb } = require('../middleware/dbAuth')
 
 // 🚦 配置登录速率限制
 // 只基于IP地址限制，避免攻击者恶意锁定特定账户
@@ -51,24 +52,24 @@ function initRateLimiters() {
 // 📝 用户注册端点
 router.post('/register', async (req, res) => {
   try {
-    const { username, email, password } = req.body;
-    const clientIp = req.ip || req.connection.remoteAddress || 'unknown';
+    const { username, email, password } = req.body
+    const clientIp = req.ip || req.connection.remoteAddress || 'unknown'
 
     // 初始化速率限制器
-    const limiters = initRateLimiters();
+    const limiters = initRateLimiters()
 
     // 检查IP速率限制
     if (limiters.ipRateLimiter) {
       try {
-        await limiters.ipRateLimiter.consume(clientIp);
+        await limiters.ipRateLimiter.consume(clientIp)
       } catch (rateLimiterRes) {
-        const retryAfter = Math.round(rateLimiterRes.msBeforeNext / 1000) || 900;
-        logger.security(`🚫 注册请求频率过高 IP: ${clientIp}`);
-        res.set('Retry-After', String(retryAfter));
+        const retryAfter = Math.round(rateLimiterRes.msBeforeNext / 1000) || 900
+        logger.security(`🚫 注册请求频率过高 IP: ${clientIp}`)
+        res.set('Retry-After', String(retryAfter))
         return res.status(429).json({
           error: 'Too many requests',
           message: '请求过于频繁，请稍后重试'
-        });
+        })
       }
     }
 
@@ -77,23 +78,23 @@ router.post('/register', async (req, res) => {
       return res.status(400).json({
         error: 'Missing fields',
         message: '用户名、邮箱和密码不能为空'
-      });
+      })
     }
 
     // 验证输入格式
     try {
-      inputValidator.validateUsername(username);
-      inputValidator.validatePassword(password);
-      
+      inputValidator.validateUsername(username)
+      inputValidator.validatePassword(password)
+
       // 简单的邮箱格式验证
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-        throw new Error('邮箱格式不正确');
+        throw new Error('邮箱格式不正确')
       }
     } catch (validationError) {
       return res.status(400).json({
         error: 'Invalid input',
         message: validationError.message
-      });
+      })
     }
 
     // 调用数据库注册服务
@@ -101,44 +102,43 @@ router.post('/register', async (req, res) => {
       username,
       email,
       password
-    });
+    })
 
     if (!result.success) {
       return res.status(400).json({
         error: result.error,
         message: result.message
-      });
+      })
     }
 
     // 注册成功，自动登录
-    const loginResult = await userServiceDb.login(username, password);
-    
+    const loginResult = await userServiceDb.login(username, password)
+
     if (loginResult.success) {
-      logger.info(`✅ 新用户注册并登录: ${username} from IP: ${clientIp}`);
-      
+      logger.info(`✅ 新用户注册并登录: ${username} from IP: ${clientIp}`)
+
       res.json({
         success: true,
         message: '注册成功',
         token: loginResult.token,
         user: loginResult.user
-      });
+      })
     } else {
       // 注册成功但登录失败（不太可能发生）
       res.json({
         success: true,
         message: '注册成功，请登录',
         user: result.user
-      });
+      })
     }
-
   } catch (error) {
-    logger.error('❌ 用户注册错误:', error);
+    logger.error('❌ 用户注册错误:', error)
     res.status(500).json({
       error: 'Registration error',
       message: '注册失败，请稍后重试'
-    });
+    })
   }
-});
+})
 
 // 🔐 用户登录端点
 router.post('/login', async (req, res) => {
@@ -198,24 +198,8 @@ router.post('/login', async (req, res) => {
       })
     }
 
-    // 检查用户管理是否启用
-    if (!config.userManagement.enabled) {
-      return res.status(503).json({
-        error: 'Service unavailable',
-        message: 'User management is not enabled'
-      })
-    }
-
-    // 检查LDAP是否启用
-    if (!config.ldap || !config.ldap.enabled) {
-      return res.status(503).json({
-        error: 'Service unavailable',
-        message: 'LDAP authentication is not enabled'
-      })
-    }
-
-    // 尝试LDAP认证
-    const authResult = await ldapService.authenticateUserCredentials(validatedUsername, password)
+    // 尝试数据库认证
+    const authResult = await userServiceDb.login(validatedUsername, password)
 
     if (!authResult.success) {
       // 登录失败
@@ -241,7 +225,7 @@ router.post('/login', async (req, res) => {
         lastName: authResult.user.lastName,
         role: authResult.user.role
       },
-      sessionToken: authResult.sessionToken
+      token: authResult.token // Changed from sessionToken to token
     })
   } catch (error) {
     logger.error('❌ User login error:', error)
@@ -273,7 +257,7 @@ router.post('/logout', authenticateUser, async (req, res) => {
 })
 
 // 👤 获取当前用户信息
-router.get('/profile', authenticateUser, async (req, res) => {
+router.get('/profile', authenticateUserDb, async (req, res) => {
   try {
     const user = await userServiceDb.getUserById(req.user.id)
     if (!user) {
@@ -314,7 +298,7 @@ router.get('/profile', authenticateUser, async (req, res) => {
 })
 
 // 🔑 获取用户的API Keys
-router.get('/api-keys', authenticateUser, async (req, res) => {
+router.get('/apikeys', authenticateUserDb, async (req, res) => {
   try {
     const { includeDeleted = 'false' } = req.query
     const apiKeys = await apiKeyService.getUserApiKeys(req.user.id, includeDeleted === 'true')
@@ -342,6 +326,8 @@ router.get('/api-keys', authenticateUser, async (req, res) => {
         id: key.id,
         name: key.name,
         description: key.description,
+        key: key.apiKey || null, // 返回完整的带前缀的密钥供前端显示/隐藏
+        keyPreview: key.keyPreview || null,
         tokenLimit: key.tokenLimit,
         isActive: key.isActive,
         createdAt: key.createdAt,
@@ -352,10 +338,6 @@ router.get('/api-keys', authenticateUser, async (req, res) => {
         dailyCostLimit: key.dailyCostLimit,
         totalCost: key.totalCost,
         totalCostLimit: key.totalCostLimit,
-        // 不返回实际的key值，只返回前缀和后几位
-        keyPreview: key.key
-          ? `${key.key.substring(0, 8)}...${key.key.substring(key.key.length - 4)}`
-          : null,
         // Include deletion fields for deleted keys
         isDeleted: key.isDeleted,
         deletedAt: key.deletedAt,
@@ -379,7 +361,7 @@ router.get('/api-keys', authenticateUser, async (req, res) => {
 })
 
 // 🔑 创建新的API Key
-router.post('/api-keys', authenticateUser, async (req, res) => {
+router.post('/apikeys', authenticateUserDb, async (req, res) => {
   try {
     const { name, description, tokenLimit, expiresAt, dailyCostLimit, totalCostLimit } = req.body
 
@@ -428,9 +410,6 @@ router.post('/api-keys', authenticateUser, async (req, res) => {
 
     const newApiKey = await apiKeyService.createApiKey(apiKeyData)
 
-    // 更新用户API Key数量
-    await userService.updateUserApiKeyCount(req.user.id, userApiKeys.length + 1)
-
     logger.info(`🔑 User ${req.user.username} created API key: ${name}`)
 
     res.status(201).json({
@@ -457,8 +436,48 @@ router.post('/api-keys', authenticateUser, async (req, res) => {
   }
 })
 
+// ✏️ 更新API Key名称
+router.put('/apikeys/:keyId', authenticateUserDb, async (req, res) => {
+  try {
+    const { keyId } = req.params
+    const { name } = req.body
+
+    if (!name || !name.trim()) {
+      return res.status(400).json({
+        error: 'Invalid input',
+        message: '密钥名称不能为空'
+      })
+    }
+
+    // 检查API Key是否属于当前用户
+    const existingKey = await apiKeyService.getApiKeyById(keyId)
+    if (!existingKey || existingKey.userId !== req.user.id) {
+      return res.status(404).json({
+        error: 'API key not found',
+        message: 'API key not found or you do not have permission to access it'
+      })
+    }
+
+    // 更新密钥名称
+    await apiKeyService.updateApiKey(keyId, { name: name.trim() })
+
+    logger.info(`✏️ User ${req.user.username} updated API key name: ${existingKey.name} -> ${name.trim()}`)
+
+    res.json({
+      success: true,
+      message: 'API key name updated successfully'
+    })
+  } catch (error) {
+    logger.error('❌ Update user API key error:', error)
+    res.status(500).json({
+      error: 'API Key update error',
+      message: 'Failed to update API key'
+    })
+  }
+})
+
 // 🗑️ 删除API Key
-router.delete('/api-keys/:keyId', authenticateUser, async (req, res) => {
+router.delete('/apikeys/:keyId', authenticateUserDb, async (req, res) => {
   try {
     const { keyId } = req.params
 
@@ -482,10 +501,6 @@ router.delete('/api-keys/:keyId', authenticateUser, async (req, res) => {
 
     await apiKeyService.deleteApiKey(keyId, req.user.username, 'user')
 
-    // 更新用户API Key数量
-    const userApiKeys = await apiKeyService.getUserApiKeys(req.user.id)
-    await userService.updateUserApiKeyCount(req.user.id, userApiKeys.length)
-
     logger.info(`🗑️ User ${req.user.username} deleted API key: ${existingKey.name}`)
 
     res.json({
@@ -502,7 +517,7 @@ router.delete('/api-keys/:keyId', authenticateUser, async (req, res) => {
 })
 
 // 📊 获取用户使用统计
-router.get('/usage-stats', authenticateUser, async (req, res) => {
+router.get('/usage-stats', authenticateUserDb, async (req, res) => {
   try {
     const { period = 'week', model } = req.query
 
@@ -849,6 +864,128 @@ router.get('/admin/ldap-test', authenticateUserOrAdmin, requireAdmin, async (req
     res.status(500).json({
       error: 'LDAP test error',
       message: 'Failed to test LDAP connection'
+    })
+  }
+})
+
+// 🔄 更新用户信息
+router.put('/profile', authenticateUserDb, async (req, res) => {
+  try {
+    const { email } = req.body
+
+    if (!email) {
+      return res.status(400).json({
+        error: 'Invalid input',
+        message: '邮箱地址不能为空'
+      })
+    }
+
+    // 验证邮箱格式
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+    if (!emailRegex.test(email)) {
+      return res.status(400).json({
+        error: 'Invalid input',
+        message: '邮箱格式不正确'
+      })
+    }
+
+    // 检查邮箱是否已被其他用户使用
+    const existingUser = await userServiceDb.findUserByEmail(email)
+    if (existingUser && existingUser._id.toString() !== req.user.id) {
+      return res.status(400).json({
+        error: 'Email already exists',
+        message: '该邮箱已被使用'
+      })
+    }
+
+    // 更新用户信息
+    const result = await userServiceDb.updateUser(req.user.id, { email })
+
+    if (!result.success) {
+      return res.status(400).json({
+        error: result.error,
+        message: result.message
+      })
+    }
+
+    logger.info(`✏️ User ${req.user.username} updated profile`)
+
+    res.json({
+      success: true,
+      message: '个人信息已更新',
+      user: result.user
+    })
+  } catch (error) {
+    logger.error('❌ Update profile error:', error)
+    res.status(500).json({
+      error: 'Update error',
+      message: '更新个人信息失败'
+    })
+  }
+})
+
+// 🔒 修改密码
+router.post('/change-password', authenticateUserDb, async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body
+
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({
+        error: 'Invalid input',
+        message: '当前密码和新密码不能为空'
+      })
+    }
+
+    // 验证新密码长度
+    if (newPassword.length < 6) {
+      return res.status(400).json({
+        error: 'Invalid input',
+        message: '新密码长度至少6位'
+      })
+    }
+
+    // 验证当前密码
+    const user = await userServiceDb.findUserById(req.user.id)
+    if (!user) {
+      return res.status(404).json({
+        error: 'User not found',
+        message: '用户不存在'
+      })
+    }
+
+    const bcrypt = require('bcryptjs')
+    const isPasswordValid = await bcrypt.compare(currentPassword, user.password)
+    if (!isPasswordValid) {
+      return res.status(400).json({
+        error: 'Invalid password',
+        message: '当前密码不正确'
+      })
+    }
+
+    // 更新密码
+    const hashedPassword = await bcrypt.hash(newPassword, 10)
+    const result = await userServiceDb.updateUser(req.user.id, {
+      password: hashedPassword
+    })
+
+    if (!result.success) {
+      return res.status(400).json({
+        error: result.error,
+        message: result.message
+      })
+    }
+
+    logger.info(`🔒 User ${req.user.username} changed password`)
+
+    res.json({
+      success: true,
+      message: '密码已更改'
+    })
+  } catch (error) {
+    logger.error('❌ Change password error:', error)
+    res.status(500).json({
+      error: 'Change password error',
+      message: '修改密码失败'
     })
   }
 })

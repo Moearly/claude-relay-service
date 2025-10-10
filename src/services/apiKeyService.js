@@ -3,6 +3,7 @@ const { v4: uuidv4 } = require('uuid')
 const config = require('../../config/config')
 const redis = require('../models/redis')
 const logger = require('../utils/logger')
+const ApiKey = require('../models/ApiKey')
 
 class ApiKeyService {
   constructor() {
@@ -617,11 +618,13 @@ class ApiKeyService {
         throw new Error('API key not found')
       }
 
+      const deletedAt = new Date().toISOString()
+
       // 标记为已删除，保留所有数据和统计信息
       const updatedData = {
         ...keyData,
         isDeleted: 'true',
-        deletedAt: new Date().toISOString(),
+        deletedAt,
         deletedBy,
         deletedByType, // 'user', 'admin', 'system'
         isActive: 'false' // 同时禁用
@@ -632,6 +635,27 @@ class ApiKeyService {
       // 从哈希映射中移除（这样就不能再使用这个key进行API调用）
       if (keyData.apiKey) {
         await redis.deleteApiKeyHash(keyData.apiKey)
+      }
+
+      // 同步到MongoDB
+      if (ApiKey) {
+        try {
+          await ApiKey.updateOne(
+            { id: keyId },
+            {
+              $set: {
+                isDeleted: true,
+                deletedAt: new Date(deletedAt),
+                deletedBy,
+                deletedByType,
+                isActive: false
+              }
+            }
+          )
+          logger.info(`💾 API Key deletion synced to MongoDB: ${keyId}`)
+        } catch (mongoError) {
+          logger.warn(`⚠️ MongoDB sync failed (non-critical): ${mongoError.message}`)
+        }
       }
 
       logger.success(`🗑️ Soft deleted API key: ${keyId} by ${deletedBy} (${deletedByType})`)
@@ -1170,20 +1194,89 @@ class ApiKeyService {
 
   // === 用户相关方法 ===
 
-  // 🔑 创建API Key（支持用户）
+  // 🔑 创建API Key（用户版本，调用原有的generateApiKey）
   async createApiKey(options = {}) {
-    return await this.generateApiKey(options)
+    try {
+      // 使用原有的 generateApiKey 方法，这是系统原生的密钥生成逻辑
+      const result = await this.generateApiKey({
+        name: options.name || 'Untitled Key',
+        description: options.description || '',
+        userId: options.userId || '',
+        userUsername: options.userUsername || '',
+        permissions: options.permissions || 'all',
+        tokenLimit: options.tokenLimit || 0,
+        expiresAt: options.expiresAt || null,
+        dailyCostLimit: options.dailyCostLimit || 0,
+        totalCostLimit: options.totalCostLimit || 0,
+        createdBy: options.createdBy || 'user',
+        isActive: true
+      })
+
+      // 持久化到MongoDB（数据落地）
+      if (ApiKey) {
+        try {
+          const mongoKey = new ApiKey({
+            id: result.id,
+            apiKey: result.apiKey, // 完整密钥值（MongoDB加密存储）
+            name: result.name,
+            description: result.description,
+            userId: options.userId,
+            userUsername: options.userUsername,
+            permissions: result.permissions,
+            tokenLimit: result.tokenLimit,
+            expiresAt: result.expiresAt,
+            dailyCostLimit: result.dailyCostLimit,
+            totalCostLimit: result.totalCostLimit,
+            isActive: result.isActive,
+            isDeleted: false,
+            createdBy: result.createdBy,
+            createdAt: result.createdAt,
+            // 初始化使用统计
+            usage: {
+              total: { requests: 0, inputTokens: 0, outputTokens: 0, totalCost: 0 },
+              daily: { requests: 0, inputTokens: 0, outputTokens: 0, totalCost: 0 },
+              monthly: { requests: 0, inputTokens: 0, outputTokens: 0, totalCost: 0 }
+            },
+            dailyCost: 0,
+            totalCost: 0
+          })
+          await mongoKey.save()
+          logger.success(`💾 API Key persisted to MongoDB: ${result.id} (${result.name})`)
+        } catch (mongoError) {
+          // MongoDB保存失败不影响主流程，因为Redis是主存储
+          logger.warn(`⚠️ MongoDB persistence failed (non-critical): ${mongoError.message}`)
+        }
+      }
+
+      return result
+    } catch (error) {
+      logger.error('❌ Failed to create API key:', error)
+      throw error
+    }
   }
 
-  // 👤 获取用户的API Keys
+  // 👤 获取用户的API Keys（使用原有Redis逻辑）
   async getUserApiKeys(userId, includeDeleted = false) {
     try {
+      // 使用原有系统的方法：从Redis获取所有API Keys
       const allKeys = await redis.getAllApiKeys()
+      logger.info(`[DEBUG] getAllApiKeys returned ${allKeys.length} keys, searching for userId="${userId}" (type: ${typeof userId})`)
+      
+      // 打印前3个key的userId用于对比
+      if (allKeys.length > 0) {
+        allKeys.slice(0, 3).forEach((key, idx) => {
+          logger.info(`[DEBUG] Key ${idx}: userId="${key.userId}" (type: ${typeof key.userId}), match=${key.userId === userId}`)
+        })
+      }
+      
       let userKeys = allKeys.filter((key) => key.userId === userId)
+      logger.info(`[DEBUG] After userId filter: ${userKeys.length} keys`)
 
       // 默认过滤掉已删除的API Keys
       if (!includeDeleted) {
+        const before = userKeys.length
         userKeys = userKeys.filter((key) => key.isDeleted !== 'true')
+        logger.info(`[DEBUG] After isDeleted filter: ${before} -> ${userKeys.length} keys`)
       }
 
       // Populate usage stats for each user's API key (same as getAllApiKeys does)
@@ -1197,7 +1290,8 @@ class ApiKeyService {
           id: key.id,
           name: key.name,
           description: key.description,
-          key: key.apiKey ? `${this.prefix}****${key.apiKey.slice(-4)}` : null, // 只显示前缀和后4位
+          apiKey: key.apiKey ? `${this.prefix}${key.apiKey}` : null, // 返回完整的带前缀的密钥
+          keyPreview: key.apiKey ? `${this.prefix}****${key.apiKey.slice(-4)}` : null, // 只显示前缀和后4位
           tokenLimit: parseInt(key.tokenLimit || 0),
           isActive: key.isActive === 'true',
           createdAt: key.createdAt,
@@ -1219,6 +1313,7 @@ class ApiKeyService {
         })
       }
 
+      logger.info(`📦 Found ${userKeysWithUsage.length} API keys for user ${userId} from Redis`)
       return userKeysWithUsage
     } catch (error) {
       logger.error('❌ Failed to get user API keys:', error)
