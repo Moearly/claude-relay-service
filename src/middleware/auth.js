@@ -7,6 +7,30 @@ const redis = require('../models/redis')
 // const { RateLimiterRedis } = require('rate-limiter-flexible') // 暂时未使用
 const ClientValidator = require('../validators/clientValidator')
 
+// 🔑 辅助函数：根据请求路径判断请求的服务类型
+function getServiceFromPath(path) {
+  if (path.startsWith('/gemini')) {
+    return 'gemini'
+  } else if (path.startsWith('/openai')) {
+    return 'openai'
+  } else if (path.startsWith('/bedrock')) {
+    return 'bedrock'
+  }
+  // /api/*, /claude/* 都被视为 claude 服务
+  return 'claude'
+}
+
+// 🔑 辅助函数：检查权限是否允许访问指定服务
+function hasServicePermission(permissions, service) {
+  if (!permissions || permissions === 'all') {
+    return true // 'all' 权限可以访问所有服务
+  }
+  
+  // 权限可以是单个值或逗号分隔的列表
+  const permissionList = permissions.split(',').map(p => p.trim())
+  return permissionList.includes(service)
+}
+
 // 🔑 API Key验证中间件（优化版）
 const authenticateApiKey = async (req, res, next) => {
   const startTime = Date.now()
@@ -48,6 +72,27 @@ const authenticateApiKey = async (req, res, next) => {
         message: validation.error
       })
     }
+
+    // 🔑 检查服务权限
+    const requestedService = getServiceFromPath(req.path)
+    const permissions = validation.keyData.permissions || 'claude'
+    
+    if (!hasServicePermission(permissions, requestedService)) {
+      const clientIP = req.ip || req.connection?.remoteAddress || 'unknown'
+      logger.security(
+        `🚫 Permission denied: API key ${validation.keyData.id} (${validation.keyData.name}) tried to access ${requestedService} service from ${clientIP}`
+      )
+      return res.status(403).json({
+        error: 'Access denied',
+        message: `This API key does not have permission to access ${requestedService} service`,
+        keyPermissions: permissions,
+        requestedService: requestedService
+      })
+    }
+    
+    logger.api(
+      `✅ Service permission validated: ${requestedService} for key ${validation.keyData.id} (${validation.keyData.name})`
+    )
 
     // 🔒 检查客户端限制（使用新的验证器）
     if (
@@ -831,8 +876,10 @@ const corsMiddleware = (req, res, next) => {
     // 新的端口配置
     'http://localhost:18080',
     'http://localhost:19090',
+    'http://localhost:19091',  // Next.js 可能使用的备用端口
     'http://127.0.0.1:18080',
-    'http://127.0.0.1:19090'
+    'http://127.0.0.1:19090',
+    'http://127.0.0.1:19091'
   ]
 
   // 🆕 检查是否为Chrome插件请求

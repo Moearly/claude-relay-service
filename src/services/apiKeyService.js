@@ -85,6 +85,7 @@ class ApiKeyService {
       createdBy: options.createdBy || 'admin',
       userId: options.userId || '',
       userUsername: options.userUsername || '',
+      source: options.source || 'admin', // 添加来源标识: 'commercial', 'admin', 'standalone'
       icon: icon || '' // 新增：图标（base64编码）
     }
 
@@ -808,10 +809,23 @@ class ApiKeyService {
     cacheCreateTokens = 0,
     cacheReadTokens = 0,
     model = 'unknown',
-    accountId = null
+    accountId = null,
+    service = null  // 🆕 添加 service 参数来标识服务类型
   ) {
     try {
       const totalTokens = inputTokens + outputTokens + cacheCreateTokens + cacheReadTokens
+
+      // 🔍 自动检测服务类型（如果未提供）
+      if (!service) {
+        // 根据 model 或 accountId 推断服务类型
+        if (model && model.toLowerCase().includes('gemini')) {
+          service = 'gemini'
+        } else if (model && (model.toLowerCase().includes('gpt') || model.toLowerCase().includes('openai'))) {
+          service = 'openai'
+        } else {
+          service = 'claude' // 默认为 claude
+        }
+      }
 
       // 计算费用
       const CostCalculator = require('../utils/costCalculator')
@@ -845,6 +859,19 @@ class ApiKeyService {
         0, // ephemeral1hTokens - 暂时为0，后续处理
         isLongContextRequest
       )
+      
+      // 🆕 按服务分类记录统计
+      await redis.incrementServiceUsage(keyId, service, {
+        totalTokens,
+        inputTokens,
+        outputTokens,
+        cacheCreateTokens,
+        cacheReadTokens,
+        requests: 1,
+        cost: costInfo.costs.total
+      })
+      
+      logger.database(`📊 Recorded ${service} usage for ${keyId}: ${totalTokens} tokens`)
 
       // 记录费用统计
       if (costInfo.costs.total > 0) {
@@ -1197,18 +1224,36 @@ class ApiKeyService {
   // 🔑 创建API Key（用户版本，调用原有的generateApiKey）
   async createApiKey(options = {}) {
     try {
+      // 🔒 权限控制逻辑
+      let permissions = options.permissions || 'all'
+      const createdBy = options.createdBy || 'user'
+      const source = options.source || 'commercial' // 标识来源
+      
+      // 如果是 commercial-website 用户创建的 Key，强制设置为 claude
+      if (createdBy === 'user' && source === 'commercial') {
+        permissions = 'claude'
+        logger.info(`🔒 Commercial user API key forced to permissions: "claude"`)
+      }
+      
+      // 验证 permissions 格式
+      const validPermissions = ['all', 'claude', 'gemini', 'openai', 'bedrock']
+      if (!validPermissions.includes(permissions)) {
+        throw new Error(`Invalid permissions: ${permissions}. Valid values: ${validPermissions.join(', ')}`)
+      }
+      
       // 使用原有的 generateApiKey 方法，这是系统原生的密钥生成逻辑
       const result = await this.generateApiKey({
         name: options.name || 'Untitled Key',
         description: options.description || '',
         userId: options.userId || '',
         userUsername: options.userUsername || '',
-        permissions: options.permissions || 'all',
+        permissions: permissions, // 使用处理后的权限
         tokenLimit: options.tokenLimit || 0,
         expiresAt: options.expiresAt || null,
         dailyCostLimit: options.dailyCostLimit || 0,
         totalCostLimit: options.totalCostLimit || 0,
-        createdBy: options.createdBy || 'user',
+        createdBy: createdBy,
+        source: source, // 添加来源标识
         isActive: true
       })
 

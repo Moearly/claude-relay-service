@@ -577,9 +577,9 @@
 
           <div>
             <label class="mb-2 block text-sm font-semibold text-gray-700 dark:text-gray-300"
-              >服务权限</label
+              >服务权限 <span class="text-red-500">*</span></label
             >
-            <div class="flex gap-4">
+            <div class="flex flex-wrap gap-3">
               <label class="flex cursor-pointer items-center">
                 <input
                   v-model="form.permissions"
@@ -587,7 +587,9 @@
                   type="radio"
                   value="all"
                 />
-                <span class="text-sm text-gray-700 dark:text-gray-300">全部服务</span>
+                <span class="text-sm text-gray-700 dark:text-gray-300">
+                  <i class="fas fa-globe mr-1 text-blue-500"></i>全部服务
+                </span>
               </label>
               <label class="flex cursor-pointer items-center">
                 <input
@@ -596,7 +598,9 @@
                   type="radio"
                   value="claude"
                 />
-                <span class="text-sm text-gray-700 dark:text-gray-300">仅 Claude</span>
+                <span class="text-sm text-gray-700 dark:text-gray-300">
+                  <i class="fas fa-robot mr-1 text-purple-500"></i>仅 Claude
+                </span>
               </label>
               <label class="flex cursor-pointer items-center">
                 <input
@@ -605,7 +609,9 @@
                   type="radio"
                   value="gemini"
                 />
-                <span class="text-sm text-gray-700 dark:text-gray-300">仅 Gemini</span>
+                <span class="text-sm text-gray-700 dark:text-gray-300">
+                  <i class="fas fa-gem mr-1 text-green-500"></i>仅 Gemini
+                </span>
               </label>
               <label class="flex cursor-pointer items-center">
                 <input
@@ -614,12 +620,41 @@
                   type="radio"
                   value="openai"
                 />
-                <span class="text-sm text-gray-700 dark:text-gray-300">仅 OpenAI</span>
+                <span class="text-sm text-gray-700 dark:text-gray-300">
+                  <i class="fas fa-brain mr-1 text-indigo-500"></i>仅 OpenAI
+                </span>
+              </label>
+              <label class="flex cursor-pointer items-center">
+                <input
+                  v-model="form.permissions"
+                  class="mr-2 text-blue-600 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700"
+                  type="radio"
+                  value="bedrock"
+                />
+                <span class="text-sm text-gray-700 dark:text-gray-300">
+                  <i class="fas fa-cloud mr-1 text-orange-500"></i>仅 Bedrock
+                </span>
               </label>
             </div>
-            <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">
-              控制此 API Key 可以访问哪些服务
-            </p>
+            <div class="mt-3 rounded-lg border border-blue-200 bg-blue-50 p-3 dark:border-blue-700 dark:bg-blue-900/20">
+              <div class="flex items-start gap-2">
+                <i class="fas fa-info-circle mt-0.5 flex-shrink-0 text-blue-500"></i>
+                <div class="space-y-1 text-xs text-gray-600 dark:text-gray-400">
+                  <p><strong>权限说明：</strong></p>
+                  <ul class="ml-4 list-disc space-y-0.5">
+                    <li><strong>全部服务</strong>: 可访问所有AI服务 (Claude, Gemini, OpenAI, Bedrock)</li>
+                    <li><strong>仅 Claude</strong>: 仅可访问 Claude 服务 (Commercial Website 用户自动使用此权限)</li>
+                    <li><strong>仅 Gemini</strong>: 仅可访问 Gemini 服务 (适合独立服务、内部AI应用)</li>
+                    <li><strong>仅 OpenAI</strong>: 仅可访问 OpenAI 服务</li>
+                    <li><strong>仅 Bedrock</strong>: 仅可访问 AWS Bedrock 服务</li>
+                  </ul>
+                  <p class="mt-2 text-amber-600 dark:text-amber-400">
+                    <i class="fas fa-exclamation-triangle mr-1"></i>
+                    <strong>Gemini 独立服务</strong>: 创建 "仅 Gemini" Key 用于内部服务，与商业网站分离，支持多账号轮询
+                  </p>
+                </div>
+              </div>
+            </div>
           </div>
 
           <div>
@@ -653,7 +688,7 @@
                   v-model="form.claudeAccountId"
                   :accounts="localAccounts.claude"
                   default-option-text="使用共享账号池"
-                  :disabled="form.permissions === 'gemini' || form.permissions === 'openai'"
+                  :disabled="form.permissions !== 'all' && form.permissions !== 'claude'"
                   :groups="localAccounts.claudeGroups"
                   placeholder="请选择Claude账号"
                   platform="claude"
@@ -667,7 +702,7 @@
                   v-model="form.geminiAccountId"
                   :accounts="localAccounts.gemini"
                   default-option-text="使用共享账号池"
-                  :disabled="form.permissions === 'claude' || form.permissions === 'openai'"
+                  :disabled="form.permissions !== 'all' && form.permissions !== 'gemini'"
                   :groups="localAccounts.geminiGroups"
                   placeholder="请选择Gemini账号"
                   platform="gemini"
@@ -681,7 +716,7 @@
                   v-model="form.openaiAccountId"
                   :accounts="localAccounts.openai"
                   default-option-text="使用共享账号池"
-                  :disabled="form.permissions === 'claude' || form.permissions === 'gemini'"
+                  :disabled="form.permissions !== 'all' && form.permissions !== 'openai'"
                   :groups="localAccounts.openaiGroups"
                   placeholder="请选择OpenAI账号"
                   platform="openai"
@@ -695,7 +730,7 @@
                   v-model="form.bedrockAccountId"
                   :accounts="localAccounts.bedrock"
                   default-option-text="使用共享账号池"
-                  :disabled="form.permissions === 'gemini' || form.permissions === 'openai'"
+                  :disabled="form.permissions !== 'all' && form.permissions !== 'bedrock'"
                   :groups="[]"
                   placeholder="请选择Bedrock账号"
                   platform="bedrock"

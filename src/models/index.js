@@ -8,6 +8,7 @@ const Order = require('./Order')
 const CreditRecord = require('./CreditRecord')
 const Announcement = require('./Announcement')
 const CardKey = require('./CardKey')
+const SubscriptionPlan = require('./SubscriptionPlan')
 
 module.exports = {
   database,
@@ -15,5 +16,6 @@ module.exports = {
   Order,
   CreditRecord,
   Announcement,
-  CardKey
+  CardKey,
+  SubscriptionPlan
 }

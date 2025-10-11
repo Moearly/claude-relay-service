@@ -8357,4 +8357,831 @@ router.post('/openai-responses-accounts/:id/reset-usage', authenticateAdmin, asy
   }
 })
 
+// ==================== 套餐管理 (Subscription Plans Management) ====================
+
+// 获取所有套餐 (包括隐藏的)
+router.get('/subscription-plans', authenticateAdmin, async (req, res) => {
+  try {
+    const subscriptionPlanService = require('../services/subscriptionPlanService')
+    const includeInactive = req.query.includeInactive === 'true'
+    
+    const plans = await subscriptionPlanService.getAllPlans(includeInactive)
+    
+    res.json({
+      success: true,
+      plans
+    })
+  } catch (error) {
+    logger.error('❌ Failed to get subscription plans:', error)
+    res.status(500).json({
+      success: false,
+      error: error.message
+    })
+  }
+})
+
+// 获取单个套餐
+router.get('/subscription-plans/:planId', authenticateAdmin, async (req, res) => {
+  try {
+    const subscriptionPlanService = require('../services/subscriptionPlanService')
+    const { planId } = req.params
+    
+    const plan = await subscriptionPlanService.getPlanById(planId)
+    
+    if (!plan) {
+      return res.status(404).json({
+        success: false,
+        error: 'Plan not found'
+      })
+    }
+    
+    res.json({
+      success: true,
+      plan
+    })
+  } catch (error) {
+    logger.error('❌ Failed to get subscription plan:', error)
+    res.status(500).json({
+      success: false,
+      error: error.message
+    })
+  }
+})
+
+// 创建新套餐
+router.post('/subscription-plans', authenticateAdmin, async (req, res) => {
+  try {
+    const subscriptionPlanService = require('../services/subscriptionPlanService')
+    const planData = req.body
+    
+    // 验证必填字段
+    if (!planData.planId || !planData.name || !planData.displayName) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required fields: planId, name, displayName'
+      })
+    }
+    
+    // 🔒 强制设置 services 为 ['claude']
+    if (!planData.features) {
+      planData.features = {}
+    }
+    planData.features.services = ['claude']
+    
+    const plan = await subscriptionPlanService.createPlan(planData)
+    
+    res.json({
+      success: true,
+      plan
+    })
+  } catch (error) {
+    logger.error('❌ Failed to create subscription plan:', error)
+    res.status(500).json({
+      success: false,
+      error: error.message
+    })
+  }
+})
+
+// 更新套餐
+router.put('/subscription-plans/:planId', authenticateAdmin, async (req, res) => {
+  try {
+    const subscriptionPlanService = require('../services/subscriptionPlanService')
+    const { planId } = req.params
+    const updates = req.body
+    
+    // 🔒 确保 services 始终为 ['claude']
+    if (updates.features && updates.features.services) {
+      updates.features.services = ['claude']
+    }
+    
+    const plan = await subscriptionPlanService.updatePlan(planId, updates)
+    
+    res.json({
+      success: true,
+      plan
+    })
+  } catch (error) {
+    logger.error('❌ Failed to update subscription plan:', error)
+    res.status(500).json({
+      success: false,
+      error: error.message
+    })
+  }
+})
+
+// 删除套餐 (软删除)
+router.delete('/subscription-plans/:planId', authenticateAdmin, async (req, res) => {
+  try {
+    const subscriptionPlanService = require('../services/subscriptionPlanService')
+    const { planId } = req.params
+    
+    await subscriptionPlanService.deletePlan(planId)
+    
+    res.json({
+      success: true,
+      message: 'Plan deleted successfully'
+    })
+  } catch (error) {
+    logger.error('❌ Failed to delete subscription plan:', error)
+    res.status(500).json({
+      success: false,
+      error: error.message
+    })
+  }
+})
+
+// 初始化默认套餐
+router.post('/subscription-plans/init-defaults', authenticateAdmin, async (req, res) => {
+  try {
+    const subscriptionPlanService = require('../services/subscriptionPlanService')
+    
+    await subscriptionPlanService.initializeDefaultPlans()
+    
+    res.json({
+      success: true,
+      message: 'Default plans initialized successfully'
+    })
+  } catch (error) {
+    logger.error('❌ Failed to initialize default plans:', error)
+    res.status(500).json({
+      success: false,
+      error: error.message
+    })
+  }
+})
+
+// ==================== 卡密管理 (Card Key Management) ====================
+
+// 批量生成卡密
+router.post('/cardkeys/generate', authenticateAdmin, async (req, res) => {
+  try {
+    const cardKeyService = require('../services/cardKeyService')
+    const {
+      count = 1,
+      creditAmount = 100,
+      type = 'credit',
+      expiresInDays = null,
+      planId = null,
+      planDuration = 30,
+      prefix = 'CRD',
+      note = ''
+    } = req.body
+    
+    const cardKeys = await cardKeyService.generateBatch({
+      count,
+      creditAmount,
+      type,
+      expiresInDays,
+      planId,
+      planDuration,
+      prefix,
+      note
+    })
+    
+    res.json({
+      success: true,
+      count: cardKeys.length,
+      cardKeys: cardKeys.map(ck => ({
+        id: ck._id,
+        code: ck.code,
+        type: ck.type,
+        creditAmount: ck.creditAmount,
+        planId: ck.planId,
+        planDuration: ck.planDuration,
+        status: ck.status,
+        expiresAt: ck.expiresAt,
+        note: ck.note
+      }))
+    })
+  } catch (error) {
+    logger.error('❌ Failed to generate card keys:', error)
+    res.status(500).json({
+      success: false,
+      error: error.message
+    })
+  }
+})
+
+// 获取卡密列表
+router.get('/cardkeys', authenticateAdmin, async (req, res) => {
+  try {
+    const cardKeyService = require('../services/cardKeyService')
+    const {
+      status = null,
+      type = null,
+      limit = 50,
+      offset = 0,
+      includeUsed = 'true'
+    } = req.query
+    
+    const result = await cardKeyService.getCardKeys({
+      status,
+      type,
+      limit: parseInt(limit),
+      offset: parseInt(offset),
+      includeUsed: includeUsed === 'true'
+    })
+    
+    res.json({
+      success: true,
+      cardKeys: result.cardKeys.map(ck => ({
+        id: ck._id,
+        code: ck.code,
+        type: ck.type,
+        creditAmount: ck.creditAmount,
+        planId: ck.planId,
+        planDuration: ck.planDuration,
+        status: ck.status,
+        expiresAt: ck.expiresAt,
+        redeemedBy: ck.redeemedBy,
+        redeemedAt: ck.redeemedAt,
+        redeemIp: ck.redeemIp,
+        note: ck.note,
+        createdAt: ck.createdAt
+      })),
+      total: result.total
+    })
+  } catch (error) {
+    logger.error('❌ Failed to get card keys:', error)
+    res.status(500).json({
+      success: false,
+      error: error.message
+    })
+  }
+})
+
+// 删除卡密
+router.delete('/cardkeys/:id', authenticateAdmin, async (req, res) => {
+  try {
+    const cardKeyService = require('../services/cardKeyService')
+    const { id } = req.params
+    
+    await cardKeyService.deleteCardKey(id)
+    
+    res.json({
+      success: true,
+      message: 'Card key deleted successfully'
+    })
+  } catch (error) {
+    logger.error('❌ Failed to delete card key:', error)
+    res.status(500).json({
+      success: false,
+      error: error.message
+    })
+  }
+})
+
+// 批量删除未使用的卡密
+router.post('/cardkeys/delete-batch', authenticateAdmin, async (req, res) => {
+  try {
+    const cardKeyService = require('../services/cardKeyService')
+    const { cardKeyIds } = req.body
+    
+    if (!Array.isArray(cardKeyIds) || cardKeyIds.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid card key IDs'
+      })
+    }
+    
+    const deletedCount = await cardKeyService.deleteUnusedBatch(cardKeyIds)
+    
+    res.json({
+      success: true,
+      deletedCount,
+      message: `Deleted ${deletedCount} unused card keys`
+    })
+  } catch (error) {
+    logger.error('❌ Failed to batch delete card keys:', error)
+    res.status(500).json({
+      success: false,
+      error: error.message
+    })
+  }
+})
+
+// 卡密统计
+router.get('/cardkeys/stats', authenticateAdmin, async (req, res) => {
+  try {
+    const { CardKey } = require('../models')
+    
+    const [
+      totalCount,
+      activeCount,
+      usedCount,
+      expiredCount,
+      creditTypeCount,
+      planTypeCount
+    ] = await Promise.all([
+      CardKey.countDocuments(),
+      CardKey.countDocuments({ status: 'active', redeemedBy: null }),
+      CardKey.countDocuments({ status: 'used' }),
+      CardKey.countDocuments({ status: 'expired' }),
+      CardKey.countDocuments({ type: 'credit' }),
+      CardKey.countDocuments({ type: 'plan' })
+    ])
+    
+    res.json({
+      success: true,
+      stats: {
+        total: totalCount,
+        active: activeCount,
+        used: usedCount,
+        expired: expiredCount,
+        byType: {
+          credit: creditTypeCount,
+          plan: planTypeCount
+        }
+      }
+    })
+  } catch (error) {
+    logger.error('❌ Failed to get card key stats:', error)
+    res.status(500).json({
+      success: false,
+      error: error.message
+    })
+  }
+})
+
+// ==================== 财务报表 (Revenue Reports) ====================
+
+// 每日收入统计
+router.get('/revenue/daily', authenticateAdmin, async (req, res) => {
+  try {
+    const { Order } = require('../models')
+    const { startDate, endDate, limit = 30 } = req.query
+    
+    const start = startDate ? new Date(startDate) : new Date(Date.now() - 30 * 86400000)
+    const end = endDate ? new Date(endDate) : new Date()
+    
+    // 按日期分组统计
+    const dailyRevenue = await Order.aggregate([
+      {
+        $match: {
+          status: { $in: ['paid', 'activated'] },
+          paidAt: { $gte: start, $lte: end }
+        }
+      },
+      {
+        $group: {
+          _id: {
+            $dateToString: { format: '%Y-%m-%d', date: '$paidAt' }
+          },
+          totalRevenue: { $sum: '$amount' },
+          orderCount: { $sum: 1 },
+          avgOrderValue: { $avg: '$amount' }
+        }
+      },
+      {
+        $sort: { _id: -1 }
+      },
+      {
+        $limit: parseInt(limit)
+      }
+    ])
+    
+    res.json({
+      success: true,
+      dailyRevenue: dailyRevenue.map(item => ({
+        date: item._id,
+        totalRevenue: item.totalRevenue,
+        orderCount: item.orderCount,
+        avgOrderValue: Math.round(item.avgOrderValue * 100) / 100
+      }))
+    })
+  } catch (error) {
+    logger.error('❌ Failed to get daily revenue:', error)
+    res.status(500).json({
+      success: false,
+      error: error.message
+    })
+  }
+})
+
+// 月度收入统计
+router.get('/revenue/monthly', authenticateAdmin, async (req, res) => {
+  try {
+    const { Order } = require('../models')
+    const { year } = req.query
+    
+    const targetYear = year ? parseInt(year) : new Date().getFullYear()
+    const startDate = new Date(targetYear, 0, 1)
+    const endDate = new Date(targetYear + 1, 0, 1)
+    
+    const monthlyRevenue = await Order.aggregate([
+      {
+        $match: {
+          status: { $in: ['paid', 'activated'] },
+          paidAt: { $gte: startDate, $lt: endDate }
+        }
+      },
+      {
+        $group: {
+          _id: {
+            $dateToString: { format: '%Y-%m', date: '$paidAt' }
+          },
+          totalRevenue: { $sum: '$amount' },
+          orderCount: { $sum: 1 },
+          avgOrderValue: { $avg: '$amount' }
+        }
+      },
+      {
+        $sort: { _id: 1 }
+      }
+    ])
+    
+    res.json({
+      success: true,
+      year: targetYear,
+      monthlyRevenue: monthlyRevenue.map(item => ({
+        month: item._id,
+        totalRevenue: item.totalRevenue,
+        orderCount: item.orderCount,
+        avgOrderValue: Math.round(item.avgOrderValue * 100) / 100
+      }))
+    })
+  } catch (error) {
+    logger.error('❌ Failed to get monthly revenue:', error)
+    res.status(500).json({
+      success: false,
+      error: error.message
+    })
+  }
+})
+
+// 按套餐统计收入
+router.get('/revenue/by-plan', authenticateAdmin, async (req, res) => {
+  try {
+    const { Order } = require('../models')
+    const { startDate, endDate } = req.query
+    
+    const start = startDate ? new Date(startDate) : new Date(Date.now() - 30 * 86400000)
+    const end = endDate ? new Date(endDate) : new Date()
+    
+    const revenueByPlan = await Order.aggregate([
+      {
+        $match: {
+          status: { $in: ['paid', 'activated'] },
+          paidAt: { $gte: start, $lte: end }
+        }
+      },
+      {
+        $group: {
+          _id: '$planId',
+          planName: { $first: '$planName' },
+          totalRevenue: { $sum: '$amount' },
+          orderCount: { $sum: 1 },
+          avgOrderValue: { $avg: '$amount' }
+        }
+      },
+      {
+        $sort: { totalRevenue: -1 }
+      }
+    ])
+    
+    const total = revenueByPlan.reduce((sum, item) => sum + item.totalRevenue, 0)
+    
+    res.json({
+      success: true,
+      revenueByPlan: revenueByPlan.map(item => ({
+        planId: item._id,
+        planName: item.planName,
+        totalRevenue: item.totalRevenue,
+        orderCount: item.orderCount,
+        avgOrderValue: Math.round(item.avgOrderValue * 100) / 100,
+        percentage: total > 0 ? Math.round((item.totalRevenue / total) * 10000) / 100 : 0
+      })),
+      totalRevenue: total
+    })
+  } catch (error) {
+    logger.error('❌ Failed to get revenue by plan:', error)
+    res.status(500).json({
+      success: false,
+      error: error.message
+    })
+  }
+})
+
+// 综合财务概览
+router.get('/revenue/overview', authenticateAdmin, async (req, res) => {
+  try {
+    const { Order, User, CardKey } = require('../models')
+    
+    const now = new Date()
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
+    const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1)
+    const lastMonthEnd = monthStart
+    
+    // 今日收入
+    const todayRevenue = await Order.aggregate([
+      {
+        $match: {
+          status: { $in: ['paid', 'activated'] },
+          paidAt: { $gte: todayStart }
+        }
+      },
+      {
+        $group: {
+          _id: null,
+          total: { $sum: '$amount' },
+          count: { $sum: 1 }
+        }
+      }
+    ])
+    
+    // 本月收入
+    const monthRevenue = await Order.aggregate([
+      {
+        $match: {
+          status: { $in: ['paid', 'activated'] },
+          paidAt: { $gte: monthStart }
+        }
+      },
+      {
+        $group: {
+          _id: null,
+          total: { $sum: '$amount' },
+          count: { $sum: 1 }
+        }
+      }
+    ])
+    
+    // 上月收入
+    const lastMonthRevenue = await Order.aggregate([
+      {
+        $match: {
+          status: { $in: ['paid', 'activated'] },
+          paidAt: { $gte: lastMonthStart, $lt: lastMonthEnd }
+        }
+      },
+      {
+        $group: {
+          _id: null,
+          total: { $sum: '$amount' }
+        }
+      }
+    ])
+    
+    // 用户统计
+    const [
+      totalUsers,
+      activeSubscribers,
+      newUsersToday,
+      newUsersThisMonth
+    ] = await Promise.all([
+      User.countDocuments(),
+      User.countDocuments({
+        'subscription.status': 'active',
+        'subscription.planId': { $ne: 'free' }
+      }),
+      User.countDocuments({
+        createdAt: { $gte: todayStart }
+      }),
+      User.countDocuments({
+        createdAt: { $gte: monthStart }
+      })
+    ])
+    
+    // 卡密统计
+    const [usedCardKeysToday, usedCardKeysMonth] = await Promise.all([
+      CardKey.countDocuments({
+        status: 'used',
+        redeemedAt: { $gte: todayStart }
+      }),
+      CardKey.countDocuments({
+        status: 'used',
+        redeemedAt: { $gte: monthStart }
+      })
+    ])
+    
+    // 计算增长率
+    const monthGrowth =
+      lastMonthRevenue[0]?.total > 0
+        ? Math.round(
+            ((monthRevenue[0]?.total || 0) / lastMonthRevenue[0].total - 1) * 10000
+          ) / 100
+        : 0
+    
+    res.json({
+      success: true,
+      overview: {
+        today: {
+          revenue: todayRevenue[0]?.total || 0,
+          orders: todayRevenue[0]?.count || 0,
+          newUsers: newUsersToday,
+          cardKeysRedeemed: usedCardKeysToday
+        },
+        thisMonth: {
+          revenue: monthRevenue[0]?.total || 0,
+          orders: monthRevenue[0]?.count || 0,
+          newUsers: newUsersThisMonth,
+          cardKeysRedeemed: usedCardKeysMonth,
+          growthRate: monthGrowth
+        },
+        lastMonth: {
+          revenue: lastMonthRevenue[0]?.total || 0
+        },
+        users: {
+          total: totalUsers,
+          activeSubscribers,
+          freeUsers: totalUsers - activeSubscribers
+        }
+      }
+    })
+  } catch (error) {
+    logger.error('❌ Failed to get revenue overview:', error)
+    res.status(500).json({
+      success: false,
+      error: error.message
+    })
+  }
+})
+
+// 导出财务报表 (CSV格式)
+router.get('/revenue/export', authenticateAdmin, async (req, res) => {
+  try {
+    const { Order } = require('../models')
+    const { startDate, endDate, format = 'csv' } = req.query
+    
+    const start = startDate ? new Date(startDate) : new Date(Date.now() - 30 * 86400000)
+    const end = endDate ? new Date(endDate) : new Date()
+    
+    const orders = await Order.find({
+      status: { $in: ['paid', 'activated'] },
+      paidAt: { $gte: start, $lte: end }
+    })
+      .sort({ paidAt: -1 })
+      .lean()
+    
+    if (format === 'csv') {
+      // 生成CSV
+      const csvHeader = 'Order ID,User ID,Plan ID,Plan Name,Amount,Currency,Payment Method,Status,Created At,Paid At\n'
+      const csvRows = orders
+        .map(
+          order =>
+            `${order.orderId},${order.userId},${order.planId},${order.planName},${order.amount},${order.currency},${order.paymentMethod},${order.status},${order.createdAt?.toISOString()},${order.paidAt?.toISOString()}`
+        )
+        .join('\n')
+      
+      const csv = csvHeader + csvRows
+      
+      res.setHeader('Content-Type', 'text/csv')
+      res.setHeader(
+        'Content-Disposition',
+        `attachment; filename=revenue-report-${start.toISOString().split('T')[0]}-to-${end.toISOString().split('T')[0]}.csv`
+      )
+      res.send(csv)
+    } else {
+      // JSON格式
+      res.json({
+        success: true,
+        orders: orders.map(order => ({
+          orderId: order.orderId,
+          userId: order.userId,
+          userUsername: order.userUsername,
+          planId: order.planId,
+          planName: order.planName,
+          amount: order.amount,
+          currency: order.currency,
+          paymentMethod: order.paymentMethod,
+          status: order.status,
+          createdAt: order.createdAt,
+          paidAt: order.paidAt,
+          activatedAt: order.activatedAt
+        }))
+      })
+    }
+  } catch (error) {
+    logger.error('❌ Failed to export revenue report:', error)
+    res.status(500).json({
+      success: false,
+      error: error.message
+    })
+  }
+})
+
+// ==================== 服务统计 (Service Statistics) ====================
+
+// 获取服务使用统计概览
+router.get('/service-stats/overview', authenticateAdmin, async (req, res) => {
+  try {
+    const { dateRange = 'daily' } = req.query
+    
+    const services = ['claude', 'gemini', 'openai', 'bedrock']
+    
+    const statsPromises = services.map(service =>
+      redis.getGlobalServiceStats(service, dateRange)
+    )
+    
+    const stats = await Promise.all(statsPromises)
+    
+    const overview = {}
+    services.forEach((service, index) => {
+      overview[service] = stats[index]
+    })
+    
+    res.json({
+      success: true,
+      dateRange,
+      overview
+    })
+  } catch (error) {
+    logger.error('❌ Failed to get service stats overview:', error)
+    res.status(500).json({
+      success: false,
+      error: error.message
+    })
+  }
+})
+
+// 获取特定服务的使用统计
+router.get('/service-stats/:service', authenticateAdmin, async (req, res) => {
+  try {
+    const { service } = req.params
+    const { dateRange = 'daily' } = req.query
+    
+    const validServices = ['claude', 'gemini', 'openai', 'bedrock']
+    if (!validServices.includes(service)) {
+      return res.status(400).json({
+        success: false,
+        error: `Invalid service. Must be one of: ${validServices.join(', ')}`
+      })
+    }
+    
+    const stats = await redis.getGlobalServiceStats(service, dateRange)
+    
+    res.json({
+      success: true,
+      service,
+      dateRange,
+      stats
+    })
+  } catch (error) {
+    logger.error(`❌ Failed to get ${req.params.service} stats:`, error)
+    res.status(500).json({
+      success: false,
+      error: error.message
+    })
+  }
+})
+
+// 获取所有API Key的服务统计
+router.get('/service-stats/keys/:service', authenticateAdmin, async (req, res) => {
+  try {
+    const { service } = req.params
+    const { dateRange = 'daily', limit = 50 } = req.query
+    
+    const validServices = ['claude', 'gemini', 'openai', 'bedrock']
+    if (!validServices.includes(service)) {
+      return res.status(400).json({
+        success: false,
+        error: `Invalid service. Must be one of: ${validServices.join(', ')}`
+      })
+    }
+    
+    // 获取所有API Keys
+    const allKeys = await apiKeyService.getAllApiKeys()
+    
+    // 获取每个Key的服务统计
+    const keyStatsPromises = allKeys
+      .filter(key => {
+        // 只统计有权限访问该服务的Key
+        const permissions = key.permissions || 'all'
+        if (permissions === 'all') return true
+        const permissionList = permissions.split(',').map(p => p.trim())
+        return permissionList.includes(service)
+      })
+      .slice(0, parseInt(limit))
+      .map(async key => {
+        const stats = await redis.getServiceUsageStats(key.id, service, dateRange)
+        return {
+          keyId: key.id,
+          keyName: key.name,
+          permissions: key.permissions,
+          ...stats
+        }
+      })
+    
+    const keyStats = await Promise.all(keyStatsPromises)
+    
+    // 按请求数排序
+    keyStats.sort((a, b) => b.requests - a.requests)
+    
+    res.json({
+      success: true,
+      service,
+      dateRange,
+      keyStats
+    })
+  } catch (error) {
+    logger.error(`❌ Failed to get ${req.params.service} key stats:`, error)
+    res.status(500).json({
+      success: false,
+      error: error.message
+    })
+  }
+})
+
 module.exports = router

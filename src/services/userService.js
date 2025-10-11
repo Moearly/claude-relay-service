@@ -265,9 +265,27 @@ class UserService {
         { new: true }
       )
 
+      if (!user) {
+        return {
+          success: false,
+          error: 'User not found',
+          message: '用户不存在'
+        }
+      }
+
+      // 转换为普通对象，确保前端可以正确读取
       return {
         success: true,
-        user
+        user: {
+          id: user._id.toString(),
+          username: user.username,
+          email: user.email,
+          displayName: user.displayName,
+          firstName: user.firstName,
+          lastName: user.lastName,
+          role: user.role,
+          isActive: user.isActive
+        }
       }
     } catch (error) {
       logger.error('❌ 更新用户信息失败:', error)

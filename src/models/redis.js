@@ -554,6 +554,144 @@ class RedisClient {
     await Promise.all(operations)
   }
 
+  // 🆕 按服务分类记录使用统计 (Claude/Gemini/OpenAI等)
+  async incrementServiceUsage(keyId, service, usageData) {
+    const now = new Date()
+    const today = getDateStringInTimezone(now)
+    const tzDate = getDateInTimezone(now)
+    const currentMonth = `${tzDate.getUTCFullYear()}-${String(tzDate.getUTCMonth() + 1).padStart(
+      2,
+      '0'
+    )}`
+    
+    const {
+      totalTokens = 0,
+      inputTokens = 0,
+      outputTokens = 0,
+      cacheCreateTokens = 0,
+      cacheReadTokens = 0,
+      requests = 1,
+      cost = 0
+    } = usageData
+
+    // 按服务分类的统计键
+    // 格式: usage:service:{service}:{keyId}:{date}
+    const serviceDaily = `usage:service:${service}:${keyId}:${today}`
+    const serviceMonthly = `usage:service:${service}:${keyId}:${currentMonth}`
+    
+    // 全局服务统计（跨所有API Key）
+    const globalServiceDaily = `usage:service:${service}:total:${today}`
+    const globalServiceMonthly = `usage:service:${service}:total:${currentMonth}`
+
+    const pipeline = this.client.pipeline()
+
+    // API Key 级别的服务统计
+    pipeline.hincrby(serviceDaily, 'totalTokens', totalTokens)
+    pipeline.hincrby(serviceDaily, 'inputTokens', inputTokens)
+    pipeline.hincrby(serviceDaily, 'outputTokens', outputTokens)
+    pipeline.hincrby(serviceDaily, 'cacheCreateTokens', cacheCreateTokens)
+    pipeline.hincrby(serviceDaily, 'cacheReadTokens', cacheReadTokens)
+    pipeline.hincrby(serviceDaily, 'requests', requests)
+    pipeline.hincrbyfloat(serviceDaily, 'cost', cost)
+    pipeline.expire(serviceDaily, 86400 * 90) // 保留90天
+
+    pipeline.hincrby(serviceMonthly, 'totalTokens', totalTokens)
+    pipeline.hincrby(serviceMonthly, 'inputTokens', inputTokens)
+    pipeline.hincrby(serviceMonthly, 'outputTokens', outputTokens)
+    pipeline.hincrby(serviceMonthly, 'cacheCreateTokens', cacheCreateTokens)
+    pipeline.hincrby(serviceMonthly, 'cacheReadTokens', cacheReadTokens)
+    pipeline.hincrby(serviceMonthly, 'requests', requests)
+    pipeline.hincrbyfloat(serviceMonthly, 'cost', cost)
+    pipeline.expire(serviceMonthly, 86400 * 365) // 保留365天
+
+    // 全局服务统计
+    pipeline.hincrby(globalServiceDaily, 'totalTokens', totalTokens)
+    pipeline.hincrby(globalServiceDaily, 'inputTokens', inputTokens)
+    pipeline.hincrby(globalServiceDaily, 'outputTokens', outputTokens)
+    pipeline.hincrby(globalServiceDaily, 'cacheCreateTokens', cacheCreateTokens)
+    pipeline.hincrby(globalServiceDaily, 'cacheReadTokens', cacheReadTokens)
+    pipeline.hincrby(globalServiceDaily, 'requests', requests)
+    pipeline.hincrbyfloat(globalServiceDaily, 'cost', cost)
+    pipeline.expire(globalServiceDaily, 86400 * 90)
+
+    pipeline.hincrby(globalServiceMonthly, 'totalTokens', totalTokens)
+    pipeline.hincrby(globalServiceMonthly, 'inputTokens', inputTokens)
+    pipeline.hincrby(globalServiceMonthly, 'outputTokens', outputTokens)
+    pipeline.hincrby(globalServiceMonthly, 'cacheCreateTokens', cacheCreateTokens)
+    pipeline.hincrby(globalServiceMonthly, 'cacheReadTokens', cacheReadTokens)
+    pipeline.hincrby(globalServiceMonthly, 'requests', requests)
+    pipeline.hincrbyfloat(globalServiceMonthly, 'cost', cost)
+    pipeline.expire(globalServiceMonthly, 86400 * 365)
+
+    await pipeline.exec()
+  }
+
+  // 🆕 获取服务级别的统计数据
+  async getServiceUsageStats(keyId, service, dateRange = 'daily') {
+    const now = new Date()
+    const today = getDateStringInTimezone(now)
+    const tzDate = getDateInTimezone(now)
+    const currentMonth = `${tzDate.getUTCFullYear()}-${String(tzDate.getUTCMonth() + 1).padStart(
+      2,
+      '0'
+    )}`
+
+    let key
+    if (dateRange === 'daily') {
+      key = `usage:service:${service}:${keyId}:${today}`
+    } else if (dateRange === 'monthly') {
+      key = `usage:service:${service}:${keyId}:${currentMonth}`
+    } else {
+      key = `usage:service:${service}:${keyId}:${today}`
+    }
+
+    const data = await this.client.hgetall(key)
+    
+    return {
+      service,
+      totalTokens: parseInt(data.totalTokens) || 0,
+      inputTokens: parseInt(data.inputTokens) || 0,
+      outputTokens: parseInt(data.outputTokens) || 0,
+      cacheCreateTokens: parseInt(data.cacheCreateTokens) || 0,
+      cacheReadTokens: parseInt(data.cacheReadTokens) || 0,
+      requests: parseInt(data.requests) || 0,
+      cost: parseFloat(data.cost) || 0
+    }
+  }
+
+  // 🆕 获取全局服务统计（跨所有API Key）
+  async getGlobalServiceStats(service, dateRange = 'daily') {
+    const now = new Date()
+    const today = getDateStringInTimezone(now)
+    const tzDate = getDateInTimezone(now)
+    const currentMonth = `${tzDate.getUTCFullYear()}-${String(tzDate.getUTCMonth() + 1).padStart(
+      2,
+      '0'
+    )}`
+
+    let key
+    if (dateRange === 'daily') {
+      key = `usage:service:${service}:total:${today}`
+    } else if (dateRange === 'monthly') {
+      key = `usage:service:${service}:total:${currentMonth}`
+    } else {
+      key = `usage:service:${service}:total:${today}`
+    }
+
+    const data = await this.client.hgetall(key)
+    
+    return {
+      service,
+      totalTokens: parseInt(data.totalTokens) || 0,
+      inputTokens: parseInt(data.inputTokens) || 0,
+      outputTokens: parseInt(data.outputTokens) || 0,
+      cacheCreateTokens: parseInt(data.cacheCreateTokens) || 0,
+      cacheReadTokens: parseInt(data.cacheReadTokens) || 0,
+      requests: parseInt(data.requests) || 0,
+      cost: parseFloat(data.cost) || 0
+    }
+  }
+
   async getUsageStats(keyId) {
     const totalKey = `usage:${keyId}`
     const today = getDateStringInTimezone()

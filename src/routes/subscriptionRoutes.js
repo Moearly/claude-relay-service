@@ -3,7 +3,9 @@ const router = express.Router()
 const { authenticateUser } = require('../middleware/auth')
 const { authenticateUserDb } = require('../middleware/dbAuth')
 const logger = require('../utils/logger')
-const { User, Order } = require('../models')
+const { User, Order, SubscriptionPlan } = require('../models')
+const subscriptionPlanService = require('../services/subscriptionPlanService')
+const userSubscriptionService = require('../services/userSubscriptionService')
 
 /**
  * 订阅管理路由
@@ -14,69 +16,16 @@ const { User, Order } = require('../models')
 router.get('/', authenticateUserDb, async (req, res) => {
   try {
     const userId = req.user.id
-
-    const user = await User.findById(userId)
-
-    if (!user) {
-      return res.status(404).json({
-        error: 'User not found',
-        message: '用户不存在'
-      })
-    }
-
-    if (!user.subscription || user.subscription.planId === 'free') {
-      return res.json({
-        success: true,
-        userId,
-        plan: '免费版',
-        planId: 'free',
-        dailyCredits: 1000,
-        status: 'active',
-        message: '您当前使用的是免费版'
-      })
-    }
-
+    
+    const subscription = await userSubscriptionService.getUserSubscription(userId)
+    
     res.json({
       success: true,
       userId,
-      plan: user.subscription.planName,
-      planId: user.subscription.planId,
-      dailyCredits: user.subscription.dailyCredits,
-      startDate: user.subscription.startDate,
-      expiryDate: user.subscription.expiryDate,
-      autoRenew: user.subscription.autoRenew,
-      status: user.subscription.status
-    })
-
-    return
-
-    const mockSubscription = {
-      userId,
-      plan: '专业版',
-      planId: 'pro',
-      dailyCredits: 18000,
-      price: 399,
-      currency: 'CNY',
-      startDate: '2025-01-01',
-      expiryDate: '2025-02-02',
-      autoRenew: true,
-      status: 'active',
-      features: [
-        '每日 18000 积分',
-        '支持所有 Claude 模型',
-        '5 个 API 密钥',
-        '优先技术支持',
-        '99.9% 服务可用性',
-        '分时段积分恢复'
-      ]
-    }
-
-    res.json({
-      success: true,
-      ...mockSubscription
+      ...subscription
     })
   } catch (error) {
-    logger.error('获取订阅信息失败:', error)
+    logger.error('❌ 获取订阅信息失败:', error)
     res.status(500).json({
       error: 'Internal server error',
       message: '获取订阅信息失败'
@@ -84,69 +33,58 @@ router.get('/', authenticateUserDb, async (req, res) => {
   }
 })
 
-// 获取可用套餐列表
+// 获取可用套餐列表 (仅Claude套餐)
 router.get('/plans', async (req, res) => {
   try {
-    // 返回所有可用套餐
-    const plans = [
-      {
-        id: 'basic',
-        name: '基础版',
-        price: 199,
-        currency: 'CNY',
-        period: 'month',
-        dailyCredits: 9000,
-        features: [
-          '每日 9000 积分',
-          '支持所有 Claude 模型',
-          '1 个 API 密钥',
-          '基础技术支持',
-          '99.5% 服务可用性'
-        ]
-      },
-      {
-        id: 'pro',
-        name: '专业版',
-        price: 399,
-        currency: 'CNY',
-        period: 'month',
-        dailyCredits: 18000,
-        recommended: true,
-        features: [
-          '每日 18000 积分',
-          '支持所有 Claude 模型',
-          '5 个 API 密钥',
-          '优先技术支持',
-          '99.9% 服务可用性',
-          '分时段积分恢复'
-        ]
-      },
-      {
-        id: 'enterprise',
-        name: '企业版',
-        price: 799,
-        currency: 'CNY',
-        period: 'month',
-        dailyCredits: 36000,
-        features: [
-          '每日 36000 积分',
-          '支持所有 Claude 模型',
-          '无限 API 密钥',
-          '1v1 工程师支持',
-          '99.99% 服务可用性',
-          '分时段积分恢复',
-          '专属客服',
-          '定制化功能'
-        ]
-      }
-    ]
-
+    const plans = await subscriptionPlanService.getAllPlans(false)
+    
+    // 格式化为前端友好的格式
+    const formattedPlans = plans.map(plan => ({
+      id: plan.planId,
+      planId: plan.planId,
+      name: plan.displayName,
+      displayName: plan.displayName,
+      description: plan.description,
+      price: plan.effectivePrice,
+      originalPrice: plan.originalPrice,
+      currency: plan.currency,
+      billingCycle: plan.billingCycle,
+      billingCycleDays: plan.billingCycleDays,
+      dailyRequests: plan.features.dailyRequests,
+      dailyCost: plan.features.dailyCost,
+      maxApiKeys: plan.features.maxApiKeys,
+      service: 'Claude', // 🔒 固定为 Claude
+      services: plan.features.services, // ['claude']
+      models: plan.features.models,
+      support: plan.features.support,
+      sla: plan.features.sla,
+      recommended: plan.isPopular,
+      trialDays: plan.trialDays,
+      isOnPromotion: plan.isOnPromotion,
+      promotion: plan.isOnPromotion ? {
+        discount: plan.promotion.discount,
+        endDate: plan.promotion.endDate
+      } : null,
+      // 生成特性列表
+      features: [
+        plan.features.dailyRequests > 0 
+          ? `每日 ${plan.features.dailyRequests.toLocaleString()} 次请求`
+          : '无限次请求',
+        `支持 ${plan.features.models.length} 个 Claude 模型`,
+        plan.features.maxApiKeys > 0
+          ? `${plan.features.maxApiKeys} 个 API 密钥`
+          : '无限 API 密钥',
+        `${plan.features.support === 'community' ? '社区' : plan.features.support === 'email' ? '邮件' : plan.features.support === 'priority' ? '优先' : '专属'}技术支持`,
+        `${plan.features.sla} 服务可用性`
+      ]
+    }))
+    
     res.json({
       success: true,
-      plans
+      plans: formattedPlans
     })
   } catch (error) {
-    logger.error('获取套餐列表失败:', error)
+    logger.error('❌ 获取套餐列表失败:', error)
     res.status(500).json({
       error: 'Internal server error',
       message: '获取套餐列表失败'
@@ -155,9 +93,9 @@ router.get('/plans', async (req, res) => {
 })
 
 // 创建订阅订单
-router.post('/orders', authenticateUser, async (req, res) => {
+router.post('/orders', authenticateUserDb, async (req, res) => {
   try {
-    const { planId, paymentMethod } = req.body
+    const { planId, paymentMethod = 'wechat' } = req.body
     const userId = req.user.id
 
     if (!planId) {
@@ -167,32 +105,27 @@ router.post('/orders', authenticateUser, async (req, res) => {
       })
     }
 
-    // TODO: 创建订单并生成支付链接
-    logger.info(`用户 ${userId} 创建订单: 套餐=${planId}, 支付方式=${paymentMethod}`)
-
-    const orderId = `ORD${Date.now()}${Math.random().toString(36).substring(2, 9).toUpperCase()}`
+    const order = await userSubscriptionService.createSubscriptionOrder(
+      userId,
+      planId,
+      paymentMethod
+    )
 
     res.json({
       success: true,
-      orderId,
-      planId,
-      amount: planId === 'basic' ? 199 : planId === 'pro' ? 399 : 799,
-      currency: 'CNY',
-      paymentUrl: `https://payment.example.com/pay/${orderId}`,
-      qrCode: `https://payment.example.com/qr/${orderId}`,
-      expiresAt: new Date(Date.now() + 900000).toISOString() // 15分钟后过期
+      ...order
     })
   } catch (error) {
-    logger.error('创建订单失败:', error)
+    logger.error('❌ 创建订单失败:', error)
     res.status(500).json({
       error: 'Internal server error',
-      message: '创建订单失败'
+      message: error.message || '创建订单失败'
     })
   }
 })
 
 // 更新自动续费设置
-router.put('/auto-renew', authenticateUser, async (req, res) => {
+router.put('/auto-renew', authenticateUserDb, async (req, res) => {
   try {
     const { autoRenew } = req.body
     const userId = req.user.id
@@ -204,55 +137,158 @@ router.put('/auto-renew', authenticateUser, async (req, res) => {
       })
     }
 
-    // TODO: 更新数据库中的自动续费设置
-    logger.info(`用户 ${userId} 更新自动续费设置: ${autoRenew}`)
+    const subscription = await userSubscriptionService.updateAutoRenew(userId, autoRenew)
 
     res.json({
       success: true,
       message: autoRenew ? '已开启自动续费' : '已关闭自动续费',
-      autoRenew
+      subscription
     })
   } catch (error) {
-    logger.error('更新自动续费设置失败:', error)
+    logger.error('❌ 更新自动续费设置失败:', error)
     res.status(500).json({
       error: 'Internal server error',
-      message: '操作失败'
+      message: error.message || '操作失败'
+    })
+  }
+})
+
+// 升级订阅
+router.post('/upgrade', authenticateUserDb, async (req, res) => {
+  try {
+    const { newPlanId, paymentMethod = 'wechat' } = req.body
+    const userId = req.user.id
+
+    if (!newPlanId) {
+      return res.status(400).json({
+        error: 'Invalid input',
+        message: '请选择新套餐'
+      })
+    }
+
+    const order = await userSubscriptionService.upgradeSubscription(
+      userId,
+      newPlanId,
+      paymentMethod
+    )
+
+    res.json({
+      success: true,
+      message: '升级订单已创建',
+      ...order
+    })
+  } catch (error) {
+    logger.error('❌ 升级订阅失败:', error)
+    res.status(500).json({
+      error: 'Internal server error',
+      message: error.message || '升级订阅失败'
+    })
+  }
+})
+
+// 取消订阅
+router.post('/cancel', authenticateUserDb, async (req, res) => {
+  try {
+    const userId = req.user.id
+
+    const result = await userSubscriptionService.cancelSubscription(userId)
+
+    res.json({
+      success: true,
+      ...result
+    })
+  } catch (error) {
+    logger.error('❌ 取消订阅失败:', error)
+    res.status(500).json({
+      error: 'Internal server error',
+      message: error.message || '取消订阅失败'
     })
   }
 })
 
 // 获取订单历史
-router.get('/orders', authenticateUser, async (req, res) => {
+router.get('/orders', authenticateUserDb, async (req, res) => {
   try {
     const userId = req.user.id
-    const { limit = 20, offset = 0 } = req.query
+    const { limit = 20, offset = 0, status } = req.query
 
-    // TODO: 从数据库获取订单历史
-    const mockOrders = [
-      {
-        id: 'ORD20250110001',
-        userId,
-        planId: 'pro',
-        planName: '专业版',
-        amount: 399,
-        currency: 'CNY',
-        status: 'paid',
-        paymentMethod: 'alipay',
-        createdAt: '2025-01-10T00:00:00Z',
-        paidAt: '2025-01-10T00:05:23Z'
-      }
-    ]
+    const query = { userId }
+    if (status) {
+      query.status = status
+    }
+
+    const total = await Order.countDocuments(query)
+    const orders = await Order.find(query)
+      .sort({ createdAt: -1 })
+      .skip(parseInt(offset))
+      .limit(parseInt(limit))
+      .lean()
 
     res.json({
       success: true,
-      orders: mockOrders.slice(offset, offset + limit),
-      total: mockOrders.length
+      orders: orders.map(order => ({
+        id: order.orderId,
+        orderId: order.orderId,
+        planId: order.planId,
+        planName: order.planName,
+        amount: order.amount,
+        originalAmount: order.originalAmount,
+        currency: order.currency,
+        status: order.status,
+        paymentMethod: order.paymentMethod,
+        createdAt: order.createdAt,
+        paidAt: order.paidAt,
+        activatedAt: order.activatedAt
+      })),
+      total
     })
   } catch (error) {
-    logger.error('获取订单历史失败:', error)
+    logger.error('❌ 获取订单历史失败:', error)
     res.status(500).json({
       error: 'Internal server error',
       message: '获取订单历史失败'
+    })
+  }
+})
+
+// 获取单个订单详情
+router.get('/orders/:orderId', authenticateUserDb, async (req, res) => {
+  try {
+    const userId = req.user.id
+    const { orderId } = req.params
+
+    const order = await Order.findOne({ orderId, userId }).lean()
+
+    if (!order) {
+      return res.status(404).json({
+        error: 'Order not found',
+        message: '订单不存在'
+      })
+    }
+
+    res.json({
+      success: true,
+      order: {
+        id: order.orderId,
+        orderId: order.orderId,
+        planId: order.planId,
+        planName: order.planName,
+        amount: order.amount,
+        originalAmount: order.originalAmount,
+        currency: order.currency,
+        status: order.status,
+        paymentMethod: order.paymentMethod,
+        createdAt: order.createdAt,
+        paidAt: order.paidAt,
+        activatedAt: order.activatedAt,
+        metadata: order.metadata
+      }
+    })
+  } catch (error) {
+    logger.error('❌ 获取订单详情失败:', error)
+    res.status(500).json({
+      error: 'Internal server error',
+      message: '获取订单详情失败'
     })
   }
 })
