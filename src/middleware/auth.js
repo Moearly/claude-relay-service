@@ -74,7 +74,7 @@ const authenticateApiKey = async (req, res, next) => {
     }
 
     // 🔑 检查服务权限
-    const requestedService = getServiceFromPath(req.path)
+    const requestedService = getServiceFromPath(req.originalUrl || req.path)
     const permissions = validation.keyData.permissions || 'claude'
     
     if (!hasServicePermission(permissions, requestedService)) {
