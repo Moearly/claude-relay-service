@@ -49,10 +49,16 @@ router.get('/users', authenticateAdmin, async (req, res) => {
       options.isActive = true // Default to active users for backwards compatibility
     }
 
-    const result = await userService.getAllUsers(options)
-
-    // Extract users array from the paginated result
-    const allUsers = result.users || []
+    let allUsers = []
+    
+    // 检查userService是否有getAllUsers方法
+    if (typeof userService.getAllUsers === 'function') {
+      const result = await userService.getAllUsers(options)
+      allUsers = result.users || []
+    } else {
+      // 如果用户管理未启用，返回空列表
+      logger.warn('User management not enabled or getAllUsers function not available')
+    }
 
     // Map to the format needed for the dropdown
     const activeUsers = allUsers.map((user) => ({

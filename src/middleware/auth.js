@@ -879,7 +879,10 @@ const corsMiddleware = (req, res, next) => {
     'http://localhost:19091',  // Next.js 可能使用的备用端口
     'http://127.0.0.1:18080',
     'http://127.0.0.1:19090',
-    'http://127.0.0.1:19091'
+    'http://127.0.0.1:19091',
+    // 生产环境域名
+    'https://codewith.site',
+    'http://codewith.site'
   ]
 
   // 🆕 检查是否为Chrome插件请求
