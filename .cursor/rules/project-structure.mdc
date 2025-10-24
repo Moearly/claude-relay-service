@@ -1,0 +1,83 @@
+---
+alwaysApply: true
+---
+
+# Claude Relay Service 项目结构
+
+## 项目信息
+- **技术栈**: Node.js + Express + MongoDB + Redis
+- **端口**: 3000
+- **生产服务器**: https://api.codewith.site
+- **主要功能**: Claude API 中转服务、用户管理、订阅管理、API Key 管理
+
+## 目录结构
+
+### 入口文件
+- [src/app.js](mdc:src/app.js) - 应用主入口
+
+### 路由 (src/routes/)
+- [admin.js](mdc:src/routes/admin.js) - 管理员路由
+- [userRoutes.js](mdc:src/routes/userRoutes.js) - 用户路由
+- [invoiceRoutes.js](mdc:src/routes/invoiceRoutes.js) - 发票路由
+- [announcementsRoutes.js](mdc:src/routes/announcementsRoutes.js) - 公告路由
+
+### 服务层 (src/services/)
+- [subscriptionPlanService.js](mdc:src/services/subscriptionPlanService.js) - 订阅套餐服务
+- [apiKeyService.js](mdc:src/services/apiKeyService.js) - API Key 服务
+- [cardKeyService.js](mdc:src/services/cardKeyService.js) - 卡密服务
+
+### 数据模型 (src/models/)
+- [User.js](mdc:src/models/User.js) - 用户模型
+- [SubscriptionPlan.js](mdc:src/models/SubscriptionPlan.js) - 订阅套餐模型
+- [Invoice.js](mdc:src/models/Invoice.js) - 发票模型
+- [ApiKey.js](mdc:src/models/ApiKey.js) - API Key 模型
+- [redis.js](mdc:src/models/redis.js) - Redis 缓存
+
+### 中间件 (src/middleware/)
+- [auth.js](mdc:src/middleware/auth.js) - 管理员认证
+- [dbAuth.js](mdc:src/middleware/dbAuth.js) - 用户认证
+
+## 服务器信息
+
+### 生产服务器
+- **IP**: 156.229.163.86
+- **用户**: root
+- **密码**: jR74pQyDMTRt*eti7@
+- **部署目录**: /opt/claude-relay-service
+- **SSH 连接**: `sshpass -p 'jR74pQyDMTRt*eti7@' ssh -o StrictHostKeyChecking=no root@156.229.163.86`
+
+### 服务管理
+```bash
+npm run service:start:daemon  # 启动服务
+npm run service:stop          # 停止服务
+npm run service:restart       # 重启服务
+npm run service:status        # 查看状态
+npm run service:logs          # 查看日志
+```
+
+## API 路径规范
+- `/admin/*` - 管理员 API (需要 adminToken)
+- `/users/*` - 用户 API (需要 auth_token)
+- `/v1/*` - Claude API 中转 (需要 API Key)
+
+## 认证机制
+
+### 管理员认证
+- **Cookie**: `adminToken`
+- **中间件**: `authenticateAdmin`
+- **用途**: 访问 `/admin/*` API
+
+### 用户认证
+- **Cookie**: `auth_token`
+- **中间件**: `authenticateUserDb`
+- **用途**: 访问 `/users/*` API
+
+## 部署流程
+1. 修改代码
+2. 上传到服务器: `sshpass -p 'jR74pQyDMTRt*eti7@' scp file.js root@156.229.163.86:/opt/claude-relay-service/path/`
+3. 重启服务: `ssh root@156.229.163.86 "cd /opt/claude-relay-service && npm run service:restart"`
+
+## 文档位置
+- 项目文档: `文档中心/`
+- 服务器配置: [21-服务器配置脚本.md](mdc:文档中心/21-服务器配置脚本.md)
+- 部署指南: [23-快速部署指南.md](mdc:文档中心/23-快速部署指南.md)

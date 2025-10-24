@@ -1,0 +1,104 @@
+---
+globs: claude-relay-service/**/*.js
+---
+
+# 后端 API 开发规范
+
+## 路由文件位置
+所有路由定义在 [src/routes/](mdc:claude-relay-service/src/routes/) 目录：
+- [admin.js](mdc:claude-relay-service/src/routes/admin.js) - 管理员路由
+- [userRoutes.js](mdc:claude-relay-service/src/routes/userRoutes.js) - 用户路由
+- [invoiceRoutes.js](mdc:claude-relay-service/src/routes/invoiceRoutes.js) - 发票路由
+- [announcementsRoutes.js](mdc:claude-relay-service/src/routes/announcementsRoutes.js) - 公告路由
+
+## 认证中间件
+
+### 管理员认证
+```javascript
+const { authenticateAdmin } = require('../middleware/auth')
+router.get('/admin/resource', authenticateAdmin, async (req, res) => {
+  // req.admin 包含管理员信息
+})
+```
+
+### 用户认证
+```javascript
+const { authenticateUserDb } = require('../middleware/dbAuth')
+router.get('/users/resource', authenticateUserDb, async (req, res) => {
+  // req.user 包含用户信息
+})
+```
+
+## 响应格式规范
+
+### 成功响应
+```javascript
+res.json({
+  success: true,
+  data: result,
+  // 可选字段
+  total: count,
+  limit: limit,
+  offset: offset
+})
+```
+
+### 错误响应
+```javascript
+res.status(400).json({
+  success: false,
+  error: 'Error message',
+  message: 'User-friendly message'
+})
+```
+
+## 数据库模型
+
+### MongoDB 模型位置
+[src/models/](mdc:claude-relay-service/src/models/) 目录：
+- [User.js](mdc:claude-relay-service/src/models/User.js) - 用户模型
+- [SubscriptionPlan.js](mdc:claude-relay-service/src/models/SubscriptionPlan.js) - 订阅套餐
+- [Invoice.js](mdc:claude-relay-service/src/models/Invoice.js) - 发票模型
+- [ApiKey.js](mdc:claude-relay-service/src/models/ApiKey.js) - API Key 模型
+
+### Redis 缓存
+使用 [src/models/redis.js](mdc:claude-relay-service/src/models/redis.js) 进行缓存操作
+
+## 服务层
+
+业务逻辑应放在 [src/services/](mdc:claude-relay-service/src/services/) 目录：
+- [subscriptionPlanService.js](mdc:claude-relay-service/src/services/subscriptionPlanService.js)
+- [apiKeyService.js](mdc:claude-relay-service/src/services/apiKeyService.js)
+- [cardKeyService.js](mdc:claude-relay-service/src/services/cardKeyService.js)
+
+## 日志记录
+
+使用统一的 logger：
+```javascript
+const logger = require('../utils/logger')
+
+logger.info('✅ Operation successful', { data })
+logger.error('❌ Operation failed:', error)
+logger.warn('⚠️  Warning message')
+```
+
+## 部署和重启
+
+修改后端代码后，必须重启服务：
+```bash
+# SSH 到服务器
+sshpass -p 'jR74pQyDMTRt*eti7@' ssh root@156.229.163.86
+
+# 进入项目目录
+cd /opt/claude-relay-service
+
+# 上传修改的文件（从本地）
+sshpass -p 'jR74pQyDMTRt*eti7@' scp -o StrictHostKeyChecking=no \
+  /path/to/local/file root@156.229.163.86:/opt/claude-relay-service/path/to/file
+
+# 重启服务
+npm run service:restart
+
+# 检查状态
+npm run service:status
+```

@@ -1,0 +1,298 @@
+---
+description: Common issues and troubleshooting guide
+---
+
+# 故障排查指南
+
+## 常见问题和解决方案
+
+### 1. SSH 连接失败
+
+**错误**: `kex_exchange_identification: Connection closed`
+
+**可能原因**:
+- 连接频率过高被服务器限制
+- 防火墙阻止
+- SSH 服务配置问题
+
+**解决方法**:
+```bash
+# 等待几秒后重试
+sleep 5 && sshpass -p 'jR74pQyDMTRt*eti7@' ssh root@156.229.163.86
+
+# 或使用不同的连接参数
+sshpass -p 'jR74pQyDMTRt*eti7@' ssh -o ServerAliveInterval=60 root@156.229.163.86
+```
+
+### 2. 端口被占用
+
+**错误**: `EADDRINUSE: address already in use 0.0.0.0:3000`
+
+**解决方法**:
+```bash
+# SSH 到服务器
+sshpass -p 'jR74pQyDMTRt*eti7@' ssh root@156.229.163.86
+
+# 查找占用端口的进程
+ps aux | grep 'node.*app.js' | grep -v grep
+
+# 杀掉进程
+pkill -f 'node.*app.js'
+
+# 或使用 PID
+kill -9 <PID>
+
+# 重新启动服务
+cd /opt/claude-relay-service
+npm run service:start:daemon
+```
+
+### 3. API 返回 401 Unauthorized
+
+**问题分析**:
+1. **管理员页面 401**: `adminToken` 过期或无效
+2. **用户页面 401**: `auth_token` 过期或无效
+3. **API 路径错误**: 使用了错误的认证方式
+
+**解决方法**:
+
+#### 检查 Cookie
+```javascript
+// 在浏览器控制台执行
+document.cookie.split('; ').forEach(c => console.log(c));
+```
+
+#### 检查 API 路径
+- `/admin/*` API 需要 `adminToken`
+- `/users/*` API 需要 `auth_token`
+
+#### 重新登录
+```typescript
+// 清除旧 token
+document.cookie = 'adminToken=; path=/; expires=Thu, 01 Jan 1970 00:00:01 GMT;';
+// 跳转到登录页
+router.push('/admin/login');
+```
+
+### 4. 前端构建失败
+
+**错误**: TypeScript 类型错误
+
+**解决方法**:
+```bash
+# 查看详细错误
+cd commercial-website
+npm run build 2>&1 | grep "Type error"
+
+# 常见问题：
+# 1. 缺少类型定义
+# 2. 接口不匹配
+# 3. 使用了不存在的属性
+```
+
+**修复示例**:
+```typescript
+// ❌ 错误：属性不存在
+const data = await adminApi.someMethod();
+data.nonExistentProperty; // Type error
+
+// ✅ 正确：检查属性或使用可选链
+data?.existingProperty;
+```
+
+### 5. Vercel 部署失败
+
+**常见原因**:
+1. 构建错误（TypeScript、ESLint）
+2. 环境变量未配置
+3. 依赖安装失败
+
+**解决方法**:
+```bash
+# 本地测试构建
+npm run build
+
+# 检查环境变量
+# 在 Vercel 项目设置中确认：
+# NEXT_PUBLIC_API_BASE_URL=https://api.codewith.site
+
+# 清除缓存重新部署
+npx vercel --prod --yes --force
+```
+
+### 6. API 调用返回空数据
+
+**问题**: 后端返回数据，但前端显示为空
+
+**原因**: 数据格式不一致
+
+**解决方法**:
+```typescript
+// 后端可能返回不同格式
+const data = await adminApi.getResource();
+
+// 兼容多种格式
+const list = Array.isArray(data) 
+  ? data 
+  : (data.data || data.resources || data.items || []);
+
+// 添加日志调试
+console.log('📦 Raw API response:', data);
+console.log('📦 Extracted list:', list);
+```
+
+### 7. 服务启动后立即崩溃
+
+**检查步骤**:
+```bash
+# SSH 到服务器
+sshpass -p 'jR74pQyDMTRt*eti7@' ssh root@156.229.163.86
+
+cd /opt/claude-relay-service
+
+# 查看错误日志
+tail -50 logs/service-error.log
+
+# 常见问题：
+# 1. MongoDB 连接失败
+# 2. Redis 连接失败
+# 3. 环境变量缺失
+# 4. 端口被占用
+```
+
+### 8. 数据库连接失败
+
+**MongoDB 连接错误**:
+```bash
+# 检查 MongoDB 服务
+systemctl status mongod
+
+# 重启 MongoDB
+systemctl restart mongod
+
+# 检查连接字符串
+cat /opt/claude-relay-service/.env | grep MONGODB_URI
+```
+
+**Redis 连接错误**:
+```bash
+# 检查 Redis 服务
+systemctl status redis
+
+# 测试连接
+redis-cli ping
+
+# 重启 Redis
+systemctl restart redis
+```
+
+### 9. 前端页面白屏
+
+**可能原因**:
+1. JavaScript 错误
+2. API 调用失败
+3. 路由配置错误
+
+**排查步骤**:
+1. 打开浏览器控制台（F12）
+2. 查看 Console 标签的错误信息
+3. 查看 Network 标签的 API 请求状态
+4. 检查 React DevTools
+
+### 10. 文件上传失败
+
+**检查项**:
+```bash
+# 检查文件权限
+ls -la /opt/claude-relay-service/
+
+# 检查磁盘空间
+df -h
+
+# 检查上传目录
+ls -la /opt/claude-relay-service/uploads/
+```
+
+## 日志查看技巧
+
+### 后端日志
+```bash
+# 实时查看所有日志
+tail -f /opt/claude-relay-service/logs/app.log
+
+# 查看错误日志
+tail -100 /opt/claude-relay-service/logs/service-error.log
+
+# 搜索特定错误
+grep "ERROR" /opt/claude-relay-service/logs/app.log | tail -20
+
+# 查看最近的 API 请求
+grep "API Request" /opt/claude-relay-service/logs/app.log | tail -20
+```
+
+### 前端日志
+```javascript
+// 在浏览器控制台启用详细日志
+localStorage.setItem('debug', 'true');
+
+// 查看所有 API 请求
+// 打开 Network 标签，筛选 XHR/Fetch
+```
+
+## 性能问题排查
+
+### 后端性能
+```bash
+# 查看 CPU 和内存使用
+top
+
+# 查看 Node 进程
+ps aux | grep node
+
+# 查看连接数
+netstat -an | grep :3000 | wc -l
+```
+
+### 前端性能
+```javascript
+// 在浏览器控制台
+// 查看页面加载时间
+performance.timing.loadEventEnd - performance.timing.navigationStart
+
+// 查看资源加载
+performance.getEntriesByType('resource')
+```
+
+## 紧急恢复流程
+
+### 后端服务崩溃
+```bash
+# 1. SSH 到服务器
+sshpass -p 'jR74pQyDMTRt*eti7@' ssh root@156.229.163.86
+
+# 2. 查看日志确认问题
+cd /opt/claude-relay-service
+tail -50 logs/service-error.log
+
+# 3. 重启服务
+npm run service:restart
+
+# 4. 如果仍然失败，恢复备份
+cp -r /tmp/backup-LATEST/* .
+npm run service:restart
+```
+
+### 前端部署问题
+```bash
+# 在 Vercel Dashboard 中回滚到上一个成功的部署
+# 或重新部署
+cd commercial-website
+npx vercel --prod --yes
+```
+
+## 联系和支持
+
+如果以上方法都无法解决问题：
+1. 检查相关文档: `claude-relay-service/文档中心/` 或 `commercial-website/文档中心/`
+2. 查看服务器配置脚本: [21-服务器配置脚本.md](mdc:claude-relay-service/文档中心/21-服务器配置脚本.md)
+3. 查看部署指南: [23-快速部署指南.md](mdc:claude-relay-service/文档中心/23-快速部署指南.md)
