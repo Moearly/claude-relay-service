@@ -9190,4 +9190,113 @@ router.get('/service-stats/keys/:service', authenticateAdmin, async (req, res) =
   }
 })
 
+// ==================== 发票管理 ====================
+
+// 获取所有发票列表（管理员）
+router.get('/invoices', authenticateAdmin, async (req, res) => {
+  try {
+    const Invoice = require('../models/Invoice')
+    const { status, limit = 50, offset = 0, userId } = req.query
+
+    const query = {}
+    if (status) {
+      query.status = status
+    }
+    if (userId) {
+      query.userId = userId
+    }
+
+    const invoices = await Invoice.find(query)
+      .sort({ createdAt: -1 })
+      .limit(parseInt(limit))
+      .skip(parseInt(offset))
+      .populate('userId', 'email username')
+      .lean()
+
+    const total = await Invoice.countDocuments(query)
+
+    const formattedInvoices = invoices.map((invoice) => ({
+      id: invoice.invoiceNumber,
+      invoiceNumber: invoice.invoiceNumber,
+      orderNumber: invoice.orderNumber,
+      amount: invoice.amount,
+      type: invoice.invoiceType === 'special' ? '增值税专用发票' : '增值税普通发票',
+      invoiceType: invoice.invoiceType,
+      status: invoice.status,
+      appliedAt: invoice.createdAt.toISOString().split('T')[0],
+      issuedAt: invoice.issuedAt ? invoice.issuedAt.toISOString().split('T')[0] : null,
+      downloadUrl: invoice.downloadUrl || null,
+      user: invoice.userId ? {
+        id: invoice.userId._id,
+        email: invoice.userId.email,
+        username: invoice.userId.username
+      } : null,
+      invoiceInfo: invoice.invoiceInfo,
+      createdAt: invoice.createdAt,
+      updatedAt: invoice.updatedAt
+    }))
+
+    res.json({
+      success: true,
+      invoices: formattedInvoices,
+      total,
+      limit: parseInt(limit),
+      offset: parseInt(offset)
+    })
+  } catch (error) {
+    logger.error('❌ Failed to get invoices:', error)
+    res.status(500).json({
+      success: false,
+      error: error.message
+    })
+  }
+})
+
+// 更新发票状态（管理员）
+router.put('/invoices/:invoiceNumber', authenticateAdmin, async (req, res) => {
+  try {
+    const Invoice = require('../models/Invoice')
+    const { invoiceNumber } = req.params
+    const { status, downloadUrl } = req.body
+
+    const invoice = await Invoice.findOne({ invoiceNumber })
+    if (!invoice) {
+      return res.status(404).json({
+        success: false,
+        error: 'Invoice not found'
+      })
+    }
+
+    if (status) {
+      invoice.status = status
+      if (status === 'issued') {
+        invoice.issuedAt = new Date()
+      }
+    }
+
+    if (downloadUrl) {
+      invoice.downloadUrl = downloadUrl
+    }
+
+    await invoice.save()
+
+    res.json({
+      success: true,
+      invoice: {
+        id: invoice.invoiceNumber,
+        invoiceNumber: invoice.invoiceNumber,
+        status: invoice.status,
+        downloadUrl: invoice.downloadUrl,
+        issuedAt: invoice.issuedAt
+      }
+    })
+  } catch (error) {
+    logger.error('❌ Failed to update invoice:', error)
+    res.status(500).json({
+      success: false,
+      error: error.message
+    })
+  }
+})
+
 module.exports = router
