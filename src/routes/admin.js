@@ -94,6 +94,426 @@ router.get('/users', authenticateAdmin, async (req, res) => {
   }
 })
 
+// 创建新用户（管理员）
+router.post('/users', authenticateAdmin, async (req, res) => {
+  try {
+    const User = require('../models/User')
+    const { username, email, password, displayName, role, credits } = req.body
+
+    // 验证必填字段
+    if (!username || !email || !password) {
+      return res.status(400).json({
+        error: 'Validation error',
+        message: '用户名、邮箱和密码为必填项'
+      })
+    }
+
+    // 检查用户名是否已存在
+    const existingUser = await User.findOne({
+      $or: [{ username }, { email }]
+    })
+
+    if (existingUser) {
+      return res.status(400).json({
+        error: 'Validation error',
+        message: existingUser.username === username ? '用户名已存在' : '邮箱已存在'
+      })
+    }
+
+    // 创建新用户
+    const newUser = new User({
+      username,
+      email,
+      password,
+      displayName: displayName || username,
+      role: role || 'user',
+      credits: credits || 0,
+      isActive: true,
+      isEmailVerified: true // 管理员创建的用户默认已验证
+    })
+
+    await newUser.save()
+
+    logger.info(`✅ 管理员创建新用户: ${username}`)
+
+    res.json({
+      success: true,
+      message: '用户创建成功',
+      user: {
+        id: newUser._id,
+        username: newUser.username,
+        email: newUser.email,
+        displayName: newUser.displayName,
+        role: newUser.role,
+        credits: newUser.credits,
+        createdAt: newUser.createdAt
+      }
+    })
+  } catch (error) {
+    logger.error('❌ 创建用户失败:', error)
+    res.status(500).json({
+      error: 'Internal server error',
+      message: error.message || '创建用户失败'
+    })
+  }
+})
+
+// 获取用户使用统计（管理员）
+router.get('/users/:userId/usage-stats', authenticateAdmin, async (req, res) => {
+  try {
+    const { userId } = req.params
+    const apiKeyService = require('../services/apiKeyService')
+    
+    // 获取用户的所有API Keys
+    const userKeys = await apiKeyService.getApiKeysByOwner(userId)
+    
+    let totalRequests = 0
+    let totalTokens = 0
+    let totalCost = 0
+    
+    // 聚合所有key的统计数据
+    for (const key of userKeys) {
+      const keyStats = await redis.getUsageStats(key.id)
+      if (keyStats) {
+        totalRequests += keyStats.totalRequests || 0
+        totalTokens += keyStats.totalTokens || 0
+        totalCost += keyStats.totalCost || 0
+      }
+    }
+    
+    res.json({
+      success: true,
+      stats: {
+        totalRequests,
+        totalTokens,
+        totalCost,
+        apiKeysCount: userKeys.length
+      }
+    })
+  } catch (error) {
+    logger.error('❌ 获取用户使用统计失败:', error)
+    res.status(500).json({
+      error: 'Internal server error',
+      message: '获取用户使用统计失败'
+    })
+  }
+})
+
+// 分配会员套餐给用户（管理员）
+router.post('/users/:userId/assign-subscription', authenticateAdmin, async (req, res) => {
+  try {
+    const { userId } = req.params
+    const { planId, planName, duration, credits } = req.body
+    const User = require('../models/User')
+    const SubscriptionPlan = require('../models/SubscriptionPlan')
+    
+    // 验证必填字段
+    if (!planId || !duration) {
+      return res.status(400).json({
+        error: 'Validation error',
+        message: '套餐ID和时长为必填项'
+      })
+    }
+    
+    // 查找用户
+    const user = await User.findById(userId)
+    if (!user) {
+      return res.status(404).json({
+        error: 'Not found',
+        message: '用户不存在'
+      })
+    }
+    
+    // 获取套餐信息
+    let plan = null
+    if (planId !== 'custom') {
+      plan = await SubscriptionPlan.findOne({ planId })
+    }
+    
+    // 计算到期时间
+    const now = new Date()
+    const expiryDate = new Date(now)
+    expiryDate.setDate(expiryDate.getDate() + parseInt(duration))
+    
+    // 更新用户订阅信息
+    user.subscription = {
+      planId: planId,
+      planName: planName || plan?.name || '自定义套餐',
+      dailyCredits: credits || plan?.dailyCredits || 0,
+      startDate: now,
+      expiryDate: expiryDate,
+      autoRenew: false,
+      status: 'active'
+    }
+    
+    // 如果提供了积分，直接设置
+    if (credits) {
+      user.credits = credits
+    }
+    
+    await user.save()
+    
+    logger.info(`✅ 管理员为用户 ${user.username} 分配套餐: ${planName || planId}`)
+    
+    res.json({
+      success: true,
+      message: '套餐分配成功',
+      subscription: user.subscription
+    })
+  } catch (error) {
+    logger.error('❌ 分配套餐失败:', error)
+    res.status(500).json({
+      error: 'Internal server error',
+      message: error.message || '分配套餐失败'
+    })
+  }
+})
+
+// 更新用户积分（管理员）
+router.post('/users/:userId/update-credits', authenticateAdmin, async (req, res) => {
+  try {
+    const { userId } = req.params
+    const { credits, operation } = req.body // operation: 'set' | 'add' | 'subtract'
+    const User = require('../models/User')
+    
+    if (credits === undefined || !operation) {
+      return res.status(400).json({
+        error: 'Validation error',
+        message: '积分数量和操作类型为必填项'
+      })
+    }
+    
+    const user = await User.findById(userId)
+    if (!user) {
+      return res.status(404).json({
+        error: 'Not found',
+        message: '用户不存在'
+      })
+    }
+    
+    const oldCredits = user.credits
+    
+    switch (operation) {
+      case 'set':
+        user.credits = credits
+        break
+      case 'add':
+        user.credits += credits
+        break
+      case 'subtract':
+        user.credits = Math.max(0, user.credits - credits)
+        break
+      default:
+        return res.status(400).json({
+          error: 'Validation error',
+          message: '无效的操作类型'
+        })
+    }
+    
+    await user.save()
+    
+    logger.info(`✅ 管理员更新用户 ${user.username} 积分: ${oldCredits} -> ${user.credits}`)
+    
+    res.json({
+      success: true,
+      message: '积分更新成功',
+      oldCredits,
+      newCredits: user.credits
+    })
+  } catch (error) {
+    logger.error('❌ 更新积分失败:', error)
+    res.status(500).json({
+      error: 'Internal server error',
+      message: error.message || '更新积分失败'
+    })
+  }
+})
+
+// 导出用户数据（管理员）
+router.get('/users/export', authenticateAdmin, async (req, res) => {
+  try {
+    const User = require('../models/User')
+    const { format = 'json' } = req.query
+
+    const users = await User.find({})
+      .select('-password -emailVerificationToken')
+      .sort({ createdAt: -1 })
+      .lean()
+
+    if (format === 'csv') {
+      // 生成CSV格式
+      const csvHeaders = [
+        'ID',
+        '用户名',
+        '邮箱',
+        '显示名称',
+        '角色',
+        '积分',
+        '订阅套餐',
+        '订阅状态',
+        '账户状态',
+        '注册时间',
+        '最后登录'
+      ]
+
+      const csvRows = users.map(user => [
+        user._id.toString(),
+        user.username,
+        user.email,
+        user.displayName || '',
+        user.role,
+        user.credits || 0,
+        user.subscription?.planName || '免费版',
+        user.subscription?.status || 'active',
+        user.isActive ? '活跃' : '禁用',
+        user.createdAt ? new Date(user.createdAt).toISOString() : '',
+        user.lastLogin ? new Date(user.lastLogin).toISOString() : ''
+      ])
+
+      // 转义CSV字段
+      const escapeCsvField = (field) => {
+        const str = String(field)
+        if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+          return `"${str.replace(/"/g, '""')}"`
+        }
+        return str
+      }
+
+      const csvContent = [
+        csvHeaders.map(escapeCsvField).join(','),
+        ...csvRows.map(row => row.map(escapeCsvField).join(','))
+      ].join('\n')
+
+      // 添加 UTF-8 BOM 以便 Excel 正确识别中文
+      const csvWithBom = '\ufeff' + csvContent
+
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8')
+      res.setHeader('Content-Disposition', `attachment; filename="users-export-${Date.now()}.csv"`)
+      return res.send(csvWithBom)
+    } else {
+      // JSON格式
+      res.setHeader('Content-Type', 'application/json')
+      res.setHeader('Content-Disposition', `attachment; filename="users-export-${Date.now()}.json"`)
+      return res.json({
+        success: true,
+        exportDate: new Date().toISOString(),
+        total: users.length,
+        users: users.map(user => ({
+          id: user._id.toString(),
+          username: user.username,
+          email: user.email,
+          displayName: user.displayName,
+          role: user.role,
+          credits: user.credits,
+          subscription: user.subscription,
+          isActive: user.isActive,
+          createdAt: user.createdAt,
+          lastLogin: user.lastLogin
+        }))
+      })
+    }
+  } catch (error) {
+    logger.error('❌ 导出用户数据失败:', error)
+    res.status(500).json({
+      error: 'Internal server error',
+      message: '导出用户数据失败'
+    })
+  }
+})
+
+// 📦 订单管理
+
+// 获取所有订单（管理员）
+router.get('/orders', authenticateAdmin, async (req, res) => {
+  try {
+    const Order = require('../models/Order')
+    const User = require('../models/User')
+    const { limit = 100, offset = 0, status, userId } = req.query
+
+    const query = {}
+    if (status) {
+      query.status = status
+    }
+    if (userId) {
+      query.userId = userId
+    }
+
+    const total = await Order.countDocuments(query)
+    const orders = await Order.find(query)
+      .sort({ createdAt: -1 })
+      .skip(parseInt(offset))
+      .limit(parseInt(limit))
+      .populate('userId', 'username email')
+      .lean()
+
+    // 格式化订单数据
+    const formattedOrders = orders.map(order => ({
+      id: order.orderId,
+      orderNo: order.orderId,
+      orderId: order.orderId,
+      userId: order.userId?._id?.toString() || order.userId,
+      username: order.userId?.username || '未知用户',
+      email: order.userId?.email || '',
+      planId: order.planId,
+      planName: order.planName,
+      amount: order.amount,
+      originalAmount: order.originalAmount,
+      currency: order.currency,
+      status: order.status,
+      paymentMethod: order.paymentMethod,
+      createdAt: order.createdAt,
+      paidAt: order.paidAt,
+      activatedAt: order.activatedAt
+    }))
+
+    res.json({
+      success: true,
+      orders: formattedOrders,
+      total
+    })
+  } catch (error) {
+    logger.error('❌ 获取订单列表失败:', error)
+    res.status(500).json({
+      error: 'Internal server error',
+      message: '获取订单列表失败'
+    })
+  }
+})
+
+// 获取单个订单详情（管理员）
+router.get('/orders/:orderId', authenticateAdmin, async (req, res) => {
+  try {
+    const Order = require('../models/Order')
+    const { orderId } = req.params
+
+    const order = await Order.findOne({ orderId })
+      .populate('userId', 'username email displayName')
+      .lean()
+
+    if (!order) {
+      return res.status(404).json({
+        error: 'Not found',
+        message: '订单不存在'
+      })
+    }
+
+    res.json({
+      success: true,
+      order: {
+        ...order,
+        username: order.userId?.username || '未知用户',
+        email: order.userId?.email || ''
+      }
+    })
+  } catch (error) {
+    logger.error('❌ 获取订单详情失败:', error)
+    res.status(500).json({
+      error: 'Internal server error',
+      message: '获取订单详情失败'
+    })
+  }
+})
+
 // 🔑 API Keys 管理
 
 // 调试：获取API Key费用详情
