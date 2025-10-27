@@ -43,7 +43,7 @@ class CardKeyService {
           creditAmount: type === 'credit' ? creditAmount : 0,
           planId: type === 'plan' ? planId : null,
           planDuration: type === 'plan' ? planDuration : 0,
-          status: 'active',
+          status: 'unused',
           expiresAt: expiresInDays ? new Date(now.getTime() + expiresInDays * 86400000) : null,
           note
         })

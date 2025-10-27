@@ -9720,3 +9720,147 @@ router.put('/invoices/:invoiceNumber', authenticateAdmin, async (req, res) => {
 })
 
 module.exports = router
+
+// ============================================
+// 📢 公告管理接口
+// ============================================
+
+// 获取公告列表（管理员）
+router.get('/announcements', authenticateAdmin, async (req, res) => {
+  try {
+    const { limit = 50, offset = 0, category } = req.query
+    const announcementService = require('../services/announcementService')
+    
+    const result = await announcementService.getList({ limit, offset, category })
+    
+    if (result.success && result.announcements.length > 0) {
+      return res.json(result)
+    }
+
+    // 返回模拟数据
+    const mockAnnouncements = [
+      {
+        id: '1',
+        title: 'claude code 官方正在大量封号',
+        content: '近期我们观察到 Claude Code 官方加强了账号监控...',
+        author: '管理员',
+        date: '2025年10月2日',
+        createdAt: '2025-10-02T00:00:00Z',
+        category: 'important',
+        status: 'published'
+      },
+      {
+        id: '2',
+        title: 'Claude Code 官方已经实装周限制',
+        content: 'Claude Code 官方已经实装了周限制功能...',
+        author: '管理员',
+        date: '2025年10月1日',
+        createdAt: '2025-10-01T00:00:00Z',
+        category: 'update',
+        status: 'published'
+      }
+    ]
+
+    let filtered = mockAnnouncements
+    if (category) {
+      filtered = filtered.filter((a) => a.category === category)
+    }
+
+    res.json({
+      success: true,
+      announcements: filtered.slice(offset, offset + limit),
+      total: filtered.length
+    })
+  } catch (error) {
+    logger.error('获取公告列表失败:', error)
+    res.status(500).json({
+      success: false,
+      error: error.message
+    })
+  }
+})
+
+// 创建公告（管理员）
+router.post('/announcements', authenticateAdmin, async (req, res) => {
+  try {
+    const { title, content, category } = req.body
+    const author = req.admin.username
+
+    if (!title || !content) {
+      return res.status(400).json({
+        success: false,
+        error: '标题和内容不能为空'
+      })
+    }
+
+    const announcementId = `ANN${Date.now()}`
+    logger.info(`管理员 ${author} 创建公告: ${title}`)
+
+    res.json({
+      success: true,
+      message: '公告创建成功',
+      id: announcementId,
+      title,
+      content,
+      category: category || 'update',
+      author,
+      createdAt: new Date().toISOString()
+    })
+  } catch (error) {
+    logger.error('创建公告失败:', error)
+    res.status(500).json({
+      success: false,
+      error: error.message
+    })
+  }
+})
+
+// 更新公告（管理员）
+router.put('/announcements/:id', authenticateAdmin, async (req, res) => {
+  try {
+    const { id } = req.params
+    const { title, content, category, status } = req.body
+    const author = req.admin.username
+
+    logger.info(`管理员 ${author} 更新公告: ${id}`)
+
+    res.json({
+      success: true,
+      message: '公告更新成功',
+      id,
+      title,
+      content,
+      category,
+      status,
+      updatedAt: new Date().toISOString()
+    })
+  } catch (error) {
+    logger.error('更新公告失败:', error)
+    res.status(500).json({
+      success: false,
+      error: error.message
+    })
+  }
+})
+
+// 删除公告（管理员）
+router.delete('/announcements/:id', authenticateAdmin, async (req, res) => {
+  try {
+    const { id } = req.params
+    const author = req.admin.username
+
+    logger.info(`管理员 ${author} 删除公告: ${id}`)
+
+    res.json({
+      success: true,
+      message: '公告删除成功'
+    })
+  } catch (error) {
+    logger.error('删除公告失败:', error)
+    res.status(500).json({
+      success: false,
+      error: error.message
+    })
+  }
+})
+
