@@ -31,65 +31,67 @@ const router = express.Router()
 // 获取所有用户列表（用于API Key分配）
 router.get('/users', authenticateAdmin, async (req, res) => {
   try {
-    const userService = require('../services/userService')
+    const User = require('../models/User')
 
     // Extract query parameters for filtering
-    const { role, isActive } = req.query
-    const options = { limit: 1000 }
-
+    const { role, isActive, limit = 1000, offset = 0, search } = req.query
+    
+    // Build query
+    const query = {}
+    
     // Apply role filter if provided
     if (role) {
-      options.role = role
+      query.role = role
     }
 
-    // Apply isActive filter if provided, otherwise default to active users only
+    // Apply isActive filter if provided
     if (isActive !== undefined) {
-      options.isActive = isActive === 'true'
-    } else {
-      options.isActive = true // Default to active users for backwards compatibility
+      query.isActive = isActive === 'true'
     }
-
-    let allUsers = []
     
-    // 检查userService是否有getAllUsers方法
-    if (typeof userService.getAllUsers === 'function') {
-      const result = await userService.getAllUsers(options)
-      allUsers = result.users || []
-    } else {
-      // 如果用户管理未启用，返回空列表
-      logger.warn('User management not enabled or getAllUsers function not available')
+    // Apply search filter
+    if (search) {
+      query.$or = [
+        { username: { $regex: search, $options: 'i' } },
+        { email: { $regex: search, $options: 'i' } },
+        { displayName: { $regex: search, $options: 'i' } }
+      ]
     }
 
-    // Map to the format needed for the dropdown
-    const activeUsers = allUsers.map((user) => ({
-      id: user.id,
+    // Query database
+    const allUsers = await User.find(query)
+      .select('username email displayName role credits isActive createdAt')
+      .sort({ createdAt: -1 })
+      .limit(parseInt(limit))
+      .skip(parseInt(offset))
+      .lean()
+    
+    const total = await User.countDocuments(query)
+
+    // Map to the format needed
+    const users = allUsers.map((user) => ({
+      id: user._id.toString(),
       username: user.username,
       displayName: user.displayName || user.username,
       email: user.email,
-      role: user.role
+      role: user.role,
+      credits: user.credits || 0,
+      isActive: user.isActive,
+      createdAt: user.createdAt
     }))
-
-    // 添加Admin选项作为第一个
-    const usersWithAdmin = [
-      {
-        id: 'admin',
-        username: 'admin',
-        displayName: 'Admin',
-        email: '',
-        role: 'admin'
-      },
-      ...activeUsers
-    ]
 
     return res.json({
       success: true,
-      data: usersWithAdmin
+      data: users,
+      total,
+      limit: parseInt(limit),
+      offset: parseInt(offset)
     })
   } catch (error) {
     logger.error('❌ Failed to get users list:', error)
     return res.status(500).json({
-      error: 'Failed to get users list',
-      message: error.message
+      success: false,
+      error: error.message
     })
   }
 })
