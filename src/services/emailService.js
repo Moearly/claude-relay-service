@@ -42,7 +42,7 @@ class EmailService {
     }
 
     // Resend 使用 SMTP 接口
-    this.transporter = nodemailer.createTransporter({
+    this.transporter = nodemailer.createTransport({
       host: 'smtp.resend.com',
       port: 465,
       secure: true,
@@ -65,7 +65,7 @@ class EmailService {
       throw new Error('SMTP 配置不完整');
     }
 
-    this.transporter = nodemailer.createTransporter({
+    this.transporter = nodemailer.createTransport({
       host: this.settings.smtpHost,
       port: this.settings.smtpPort,
       secure: this.settings.smtpSecure,
