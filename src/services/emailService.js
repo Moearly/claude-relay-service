@@ -79,16 +79,15 @@ class EmailService {
    * 发送邮件
    */
   async sendEmail({ to, subject, html, text }) {
+    // 重新加载设置以确保使用最新配置
+    await this.reloadSettings();
+
     if (!this.settings || !this.settings.enabled) {
-      throw new Error('Email service is not enabled');
+      throw new Error('邮件服务未启用，请先在系统设置中启用邮件服务');
     }
 
     if (!this.transporter) {
-      await this.initialize();
-    }
-
-    if (!this.transporter) {
-      throw new Error('Email transporter is not initialized');
+      throw new Error('邮件传输器未初始化，请检查邮件配置是否正确');
     }
 
     const mailOptions = {
@@ -105,7 +104,14 @@ class EmailService {
       return { success: true, messageId: info.messageId };
     } catch (error) {
       console.error('❌ Failed to send email:', error);
-      throw error;
+      // 提供更友好的错误信息
+      if (error.code === 'EAUTH') {
+        throw new Error('邮件服务认证失败，请检查 API Key 或 SMTP 用户名密码是否正确');
+      } else if (error.code === 'ECONNECTION') {
+        throw new Error('无法连接到邮件服务器，请检查网络连接和服务器配置');
+      } else {
+        throw new Error(`发送邮件失败：${error.message}`);
+      }
     }
   }
 
@@ -221,7 +227,13 @@ class EmailService {
    */
   async reloadSettings() {
     this.transporter = null;
-    await this.initialize();
+    this.settings = null;
+    try {
+      await this.initialize();
+    } catch (error) {
+      console.error('❌ Failed to reload email settings:', error);
+      // 不抛出错误，让调用方处理
+    }
   }
 }
 
