@@ -9749,47 +9749,41 @@ module.exports = router
 router.get('/announcements', authenticateAdmin, async (req, res) => {
   try {
     const { limit = 50, offset = 0, category } = req.query
-    const announcementService = require('../services/announcementService')
+    const Announcement = require('../models/Announcement')
     
-    const result = await announcementService.getList({ limit, offset, category })
-    
-    if (result.success && result.announcements.length > 0) {
-      return res.json(result)
-    }
-
-    // 返回模拟数据
-    const mockAnnouncements = [
-      {
-        id: '1',
-        title: 'claude code 官方正在大量封号',
-        content: '近期我们观察到 Claude Code 官方加强了账号监控...',
-        author: '管理员',
-        date: '2025年10月2日',
-        createdAt: '2025-10-02T00:00:00Z',
-        category: 'important',
-        status: 'published'
-      },
-      {
-        id: '2',
-        title: 'Claude Code 官方已经实装周限制',
-        content: 'Claude Code 官方已经实装了周限制功能...',
-        author: '管理员',
-        date: '2025年10月1日',
-        createdAt: '2025-10-01T00:00:00Z',
-        category: 'update',
-        status: 'published'
-      }
-    ]
-
-    let filtered = mockAnnouncements
+    // 构建查询条件
+    const query = {}
     if (category) {
-      filtered = filtered.filter((a) => a.category === category)
+      query.category = category
     }
+    
+    // 查询数据库
+    const announcements = await Announcement.find(query)
+      .sort({ isPinned: -1, priority: -1, createdAt: -1 })
+      .limit(parseInt(limit))
+      .skip(parseInt(offset))
+      .lean()
+    
+    const total = await Announcement.countDocuments(query)
+    
+    // 格式化返回数据
+    const formattedAnnouncements = announcements.map(ann => ({
+      id: ann._id.toString(),
+      title: ann.title,
+      content: ann.content,
+      category: ann.category,
+      status: ann.status,
+      author: ann.author,
+      createdAt: ann.createdAt,
+      updatedAt: ann.updatedAt,
+      views: ann.views || 0,
+      isPinned: ann.isPinned || false
+    }))
 
     res.json({
       success: true,
-      announcements: filtered.slice(offset, offset + limit),
-      total: filtered.length
+      announcements: formattedAnnouncements,
+      total
     })
   } catch (error) {
     logger.error('获取公告列表失败:', error)
@@ -9803,7 +9797,8 @@ router.get('/announcements', authenticateAdmin, async (req, res) => {
 // 创建公告（管理员）
 router.post('/announcements', authenticateAdmin, async (req, res) => {
   try {
-    const { title, content, category } = req.body
+    const { title, content, category, status } = req.body
+    const Announcement = require('../models/Announcement')
     const author = req.admin.username
 
     if (!title || !content) {
@@ -9813,21 +9808,35 @@ router.post('/announcements', authenticateAdmin, async (req, res) => {
       })
     }
 
-    const announcementId = `ANN${Date.now()}`
-    logger.info(`管理员 ${author} 创建公告: ${title}`)
+    // 创建新公告
+    const announcement = new Announcement({
+      title,
+      content,
+      category: category || 'update',
+      status: status || 'published',
+      author,
+      publishedAt: status === 'published' ? new Date() : null
+    })
+
+    await announcement.save()
+    
+    logger.info(`✅ 管理员 ${author} 创建公告: ${title}`)
 
     res.json({
       success: true,
       message: '公告创建成功',
-      id: announcementId,
-      title,
-      content,
-      category: category || 'update',
-      author,
-      createdAt: new Date().toISOString()
+      announcement: {
+        id: announcement._id.toString(),
+        title: announcement.title,
+        content: announcement.content,
+        category: announcement.category,
+        status: announcement.status,
+        author: announcement.author,
+        createdAt: announcement.createdAt
+      }
     })
   } catch (error) {
-    logger.error('创建公告失败:', error)
+    logger.error('❌ 创建公告失败:', error)
     res.status(500).json({
       success: false,
       error: error.message
@@ -9840,22 +9849,48 @@ router.put('/announcements/:id', authenticateAdmin, async (req, res) => {
   try {
     const { id } = req.params
     const { title, content, category, status } = req.body
+    const Announcement = require('../models/Announcement')
     const author = req.admin.username
 
-    logger.info(`管理员 ${author} 更新公告: ${id}`)
+    // 查找公告
+    const announcement = await Announcement.findById(id)
+    if (!announcement) {
+      return res.status(404).json({
+        success: false,
+        error: '公告不存在'
+      })
+    }
+
+    // 更新字段
+    if (title) announcement.title = title
+    if (content) announcement.content = content
+    if (category) announcement.category = category
+    if (status) {
+      announcement.status = status
+      if (status === 'published' && !announcement.publishedAt) {
+        announcement.publishedAt = new Date()
+      }
+    }
+    announcement.updatedAt = new Date()
+
+    await announcement.save()
+    
+    logger.info(`✅ 管理员 ${author} 更新公告: ${announcement.title}`)
 
     res.json({
       success: true,
       message: '公告更新成功',
-      id,
-      title,
-      content,
-      category,
-      status,
-      updatedAt: new Date().toISOString()
+      announcement: {
+        id: announcement._id.toString(),
+        title: announcement.title,
+        content: announcement.content,
+        category: announcement.category,
+        status: announcement.status,
+        updatedAt: announcement.updatedAt
+      }
     })
   } catch (error) {
-    logger.error('更新公告失败:', error)
+    logger.error('❌ 更新公告失败:', error)
     res.status(500).json({
       success: false,
       error: error.message
@@ -9867,16 +9902,26 @@ router.put('/announcements/:id', authenticateAdmin, async (req, res) => {
 router.delete('/announcements/:id', authenticateAdmin, async (req, res) => {
   try {
     const { id } = req.params
+    const Announcement = require('../models/Announcement')
     const author = req.admin.username
 
-    logger.info(`管理员 ${author} 删除公告: ${id}`)
+    // 查找并删除公告
+    const announcement = await Announcement.findByIdAndDelete(id)
+    if (!announcement) {
+      return res.status(404).json({
+        success: false,
+        error: '公告不存在'
+      })
+    }
+
+    logger.info(`✅ 管理员 ${author} 删除公告: ${announcement.title}`)
 
     res.json({
       success: true,
       message: '公告删除成功'
     })
   } catch (error) {
-    logger.error('删除公告失败:', error)
+    logger.error('❌ 删除公告失败:', error)
     res.status(500).json({
       success: false,
       error: error.message
