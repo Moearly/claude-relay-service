@@ -9984,10 +9984,16 @@ router.put('/email-settings', authenticateAdmin, async (req, res) => {
     
     const settings = await EmailSettings.getSettings()
     
+    logger.info(`📧 更新邮件设置 - Provider: ${provider}, Enabled: ${enabled}`)
+    logger.info(`📧 Resend API Key 提供: ${resendApiKey !== undefined ? '是' : '否'}`)
+    
     // 更新字段
     if (provider !== undefined) settings.provider = provider
     if (enabled !== undefined) settings.enabled = enabled
-    if (resendApiKey !== undefined) settings.resendApiKey = resendApiKey
+    if (resendApiKey !== undefined && resendApiKey !== '') {
+      settings.resendApiKey = resendApiKey
+      logger.info(`📧 更新 Resend API Key: ${resendApiKey.substring(0, 6)}...`)
+    }
     if (smtpHost !== undefined) settings.smtpHost = smtpHost
     if (smtpPort !== undefined) settings.smtpPort = smtpPort
     if (smtpUser !== undefined) settings.smtpUser = smtpUser
@@ -10002,6 +10008,8 @@ router.put('/email-settings', authenticateAdmin, async (req, res) => {
     settings.updatedAt = new Date()
     
     await settings.save()
+    
+    logger.info(`✅ 邮件设置已保存到数据库`)
     
     // 重新加载邮件服务
     await emailService.reloadSettings()

@@ -20,9 +20,9 @@ class EmailService {
       }
 
       if (this.settings.provider === 'resend') {
-        await this.initializeResend();
+        this.initializeResend();
       } else if (this.settings.provider === 'smtp') {
-        await this.initializeSMTP();
+        this.initializeSMTP();
       }
 
       return true;
@@ -35,9 +35,10 @@ class EmailService {
   /**
    * 初始化 Resend
    */
-  async initializeResend() {
+  initializeResend() {
     if (!this.settings.resendApiKey) {
-      throw new Error('Resend API Key is not configured');
+      console.error('❌ Resend API Key is not configured');
+      throw new Error('Resend API Key 未配置');
     }
 
     // Resend 使用 SMTP 接口
@@ -52,14 +53,16 @@ class EmailService {
     });
 
     console.log('✅ Resend email service initialized');
+    console.log('📧 Resend API Key:', this.settings.resendApiKey ? `${this.settings.resendApiKey.substring(0, 6)}...` : 'not set');
   }
 
   /**
    * 初始化自定义 SMTP
    */
-  async initializeSMTP() {
+  initializeSMTP() {
     if (!this.settings.smtpHost || !this.settings.smtpUser) {
-      throw new Error('SMTP configuration is incomplete');
+      console.error('❌ SMTP configuration is incomplete');
+      throw new Error('SMTP 配置不完整');
     }
 
     this.transporter = nodemailer.createTransporter({
@@ -73,6 +76,7 @@ class EmailService {
     });
 
     console.log('✅ SMTP email service initialized');
+    console.log('📧 SMTP Host:', this.settings.smtpHost);
   }
 
   /**
