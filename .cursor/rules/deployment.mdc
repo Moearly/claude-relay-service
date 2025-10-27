@@ -11,9 +11,45 @@ description: Deployment procedures and server management
 - **用户**: root
 - **密码**: jR74pQyDMTRt*eti7@
 - **部署目录**: /opt/claude-relay-service
+- **API 地址**: https://api.codewith.site
 - **SSH 连接**: `sshpass -p 'jR74pQyDMTRt*eti7@' ssh -o StrictHostKeyChecking=no root@156.229.163.86`
 
-## 后端部署流程
+## 🚀 推荐部署方式：自动化部署脚本
+
+### 一键部署（强烈推荐）
+```bash
+cd /home/leiyi/codeSpace/ApiRelay/claude-relay-service
+
+# 标准部署（自动检查、备份、上传、重启、验证）
+./scripts/deploy.sh
+
+# 强制重新安装依赖
+./scripts/deploy.sh --force
+```
+
+**自动化部署脚本会执行**:
+1. ✅ 检查本地环境（git, node, npm, sshpass）
+2. ✅ 检查服务器环境（连接、目录、配置）
+3. ✅ 备份当前版本（保存到 backups/ 目录）
+4. ✅ 上传代码文件
+5. ✅ 安装依赖（如需要）
+6. ✅ 停止旧服务（自动处理端口占用）
+7. ✅ 启动新服务
+8. ✅ 健康检查（重试 5 次）
+9. ✅ 运行 API 测试
+10. ✅ 检查错误日志
+
+### 部署前检查
+```bash
+# 检查环境配置是否完整
+./scripts/check-env.sh
+
+# 本地运行 API 测试
+export ADMIN_TOKEN="your-admin-token"
+node scripts/test-api.js
+```
+
+## 手动部署方式（不推荐）
 
 ### 方式 1: 直接上传文件
 ```bash
@@ -34,6 +70,13 @@ sshpass -p 'jR74pQyDMTRt*eti7@' ssh -o StrictHostKeyChecking=no \
   root@156.229.163.86 \
   "cd /opt/claude-relay-service && git pull && npm run service:restart"
 ```
+
+**⚠️ 手动部署的问题**:
+- 容易遗漏文件
+- 没有自动备份
+- 没有健康检查
+- 端口占用需要手动处理
+- 无法验证部署是否成功
 
 ### 服务管理命令
 ```bash
@@ -131,24 +174,57 @@ REDIS_URL=redis://...
 在 Vercel 项目设置中配置：
 - `NEXT_PUBLIC_API_BASE_URL=https://api.codewith.site`
 
-## 日志查看
+## 📋 日志管理
 
-### 后端日志
+### 使用日志查看工具（推荐）
+```bash
+# 查看最近 50 行日志
+./scripts/view-logs.sh
+
+# 实时跟踪日志
+./scripts/view-logs.sh -f
+
+# 只显示错误日志
+./scripts/view-logs.sh -e
+
+# 显示最后 100 行
+./scripts/view-logs.sh -n 100
+
+# 搜索包含 "MongoDB" 的日志
+./scripts/view-logs.sh -s "MongoDB"
+
+# 组合使用：实时跟踪错误
+./scripts/view-logs.sh -f -e
+```
+
+### 手动查看日志
 ```bash
 # SSH 到服务器
 sshpass -p 'jR74pQyDMTRt*eti7@' ssh root@156.229.163.86
 
 cd /opt/claude-relay-service
 
-# 查看应用日志
-tail -100 logs/app.log
+# 查看服务日志
+tail -100 logs/service.log
+
+# 查看请求日志（详细）
+tail -100 logs/requests.log
 
 # 查看错误日志
-tail -100 logs/service-error.log
+tail -100 logs/error.log
 
 # 实时日志
-tail -f logs/app.log
+tail -f logs/service.log
+
+# 搜索错误
+grep -i error logs/service.log | tail -50
 ```
+
+### 日志文件说明
+- `logs/service.log` - 主服务日志
+- `logs/requests.log` - 详细的请求/响应日志（包含 requestId）
+- `logs/error.log` - 错误日志
+- `logs/access.log` - 访问日志
 
 ### 前端日志
 在 Vercel 项目页面查看：

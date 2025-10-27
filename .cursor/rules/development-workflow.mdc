@@ -1,0 +1,301 @@
+---
+description: Development workflow and best practices
+---
+
+# 开发工作流程和最佳实践
+
+## 🔄 标准开发流程
+
+### 1. 本地开发
+```bash
+cd /home/leiyi/codeSpace/ApiRelay/claude-relay-service
+
+# 启动开发服务器
+npm run dev
+
+# 或使用 nodemon 自动重启
+nodemon src/app.js
+```
+
+### 2. 代码检查
+```bash
+# 运行 ESLint
+npm run lint
+
+# 自动修复问题
+npm run lint:fix
+
+# 格式化代码
+npm run format
+```
+
+### 3. 提交代码
+```bash
+# 查看修改
+git status
+
+# 添加文件
+git add .
+
+# 提交（使用有意义的提交信息）
+git commit -m "feat: 添加新功能"
+# 或
+git commit -m "fix: 修复某个问题"
+# 或
+git commit -m "refactor: 重构某个模块"
+
+# 推送到远程
+git push origin main
+```
+
+### 4. 部署到生产环境
+```bash
+# 使用自动化部署脚本（强烈推荐）
+./scripts/deploy.sh
+
+# 部署会自动执行：
+# ✅ 环境检查
+# ✅ 代码上传
+# ✅ 服务重启
+# ✅ 健康检查
+# ✅ API 测试
+```
+
+### 5. 验证部署
+```bash
+# 运行完整测试
+export ADMIN_TOKEN="your-admin-token"
+node scripts/test-api.js
+
+# 查看日志
+./scripts/view-logs.sh -e -n 50
+
+# 检查环境
+./scripts/check-env.sh
+```
+
+## 📝 提交信息规范
+
+使用语义化提交信息：
+
+- `feat:` - 新功能
+- `fix:` - 修复 bug
+- `refactor:` - 重构代码
+- `docs:` - 文档更新
+- `style:` - 代码格式调整
+- `test:` - 测试相关
+- `chore:` - 构建/工具相关
+
+**示例**:
+```bash
+git commit -m "feat: 添加用户导出功能"
+git commit -m "fix: 修复订单列表 401 错误"
+git commit -m "refactor: 优化认证中间件"
+git commit -m "docs: 更新部署文档"
+```
+
+## 🔧 添加新的 API 接口
+
+### 1. 创建路由
+在 [src/routes/admin.js](mdc:src/routes/admin.js) 中添加：
+
+```javascript
+// 新接口
+router.get('/new-endpoint', authenticateAdmin, async (req, res) => {
+  try {
+    // 业务逻辑
+    const data = await someService.getData();
+    
+    res.json({
+      success: true,
+      data
+    });
+  } catch (error) {
+    logger.error('Error in new endpoint:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+```
+
+### 2. 添加前端 API 调用
+在 [commercial-website/src/lib/admin/api-client.ts](mdc:commercial-website/src/lib/admin/api-client.ts) 中添加：
+
+```typescript
+async getNewData(): Promise<any> {
+  const client = getAdminApiClient();
+  const response = await client.get('/new-endpoint');
+  return extractData(response);
+}
+```
+
+### 3. 添加测试用例
+在 [scripts/test-api.js](mdc:scripts/test-api.js) 中添加：
+
+```javascript
+{
+  name: '测试新接口',
+  method: 'GET',
+  url: '/admin/new-endpoint',
+  auth: true,
+  expect: { status: 200, hasData: true }
+}
+```
+
+### 4. 部署和测试
+```bash
+# 部署
+./scripts/deploy.sh
+
+# 测试
+export ADMIN_TOKEN="your-token"
+node scripts/test-api.js
+```
+
+## 🐛 调试技巧
+
+### 后端调试
+```javascript
+// 使用 logger
+const logger = require('./utils/logger');
+
+logger.info('Info message');
+logger.warn('Warning message');
+logger.error('Error message', error);
+logger.debug('Debug message', { data });
+```
+
+### 查看详细日志
+```bash
+# 实时跟踪所有日志
+./scripts/view-logs.sh -f
+
+# 只看错误
+./scripts/view-logs.sh -f -e
+
+# 搜索特定内容
+./scripts/view-logs.sh -s "MongoDB"
+```
+
+### 前端调试
+```typescript
+// 在浏览器控制台
+console.log('📦 Data:', data);
+console.error('❌ Error:', error);
+
+// 查看 API 请求
+// 打开 Network 标签，筛选 XHR/Fetch
+```
+
+## 🔍 常见开发场景
+
+### 场景 1: 修改现有接口
+
+1. 找到对应的路由文件（通常在 `src/routes/`）
+2. 修改业务逻辑
+3. 本地测试
+4. 部署：`./scripts/deploy.sh`
+5. 验证：`node scripts/test-api.js`
+
+### 场景 2: 添加新的数据库模型
+
+1. 在 `src/models/` 创建新模型
+2. 定义 Mongoose Schema
+3. 在路由中使用模型
+4. 更新相关接口
+5. 部署和测试
+
+### 场景 3: 修复生产环境 Bug
+
+1. 查看错误日志：`./scripts/view-logs.sh -e`
+2. 本地复现问题
+3. 修复代码
+4. 本地测试
+5. 快速部署：`./scripts/deploy.sh`
+6. 验证修复：`node scripts/test-api.js`
+7. 持续监控：`./scripts/view-logs.sh -f -e`
+
+### 场景 4: 数据库迁移
+
+1. 创建迁移脚本
+2. 在测试环境验证
+3. 备份生产数据
+4. 执行迁移
+5. 验证数据完整性
+6. 部署相关代码
+
+## ⚠️ 注意事项
+
+### 部署前检查清单
+- [ ] 代码已提交到 Git
+- [ ] 本地测试通过
+- [ ] 没有 ESLint 错误
+- [ ] 环境变量已配置
+- [ ] 数据库迁移已准备（如需要）
+
+### 部署后验证清单
+- [ ] 健康检查通过：`curl https://api.codewith.site/health`
+- [ ] API 测试通过：`node scripts/test-api.js`
+- [ ] 没有错误日志：`./scripts/view-logs.sh -e`
+- [ ] 前端功能正常
+- [ ] 服务进程运行中：`ps aux | grep node`
+
+### 禁止操作
+- ❌ 直接在生产服务器上修改代码
+- ❌ 不经测试直接部署
+- ❌ 删除备份文件
+- ❌ 在生产环境调试
+- ❌ 硬编码敏感信息
+
+### 推荐操作
+- ✅ 使用自动化部署脚本
+- ✅ 部署前运行测试
+- ✅ 保持代码和文档同步
+- ✅ 使用有意义的提交信息
+- ✅ 定期查看日志
+- ✅ 及时备份重要数据
+
+## 🛠️ 开发工具
+
+### 必备工具
+- **Node.js** >= 16.x
+- **npm** >= 8.x
+- **Git**
+- **sshpass** (用于自动化部署)
+- **curl** (用于测试 API)
+
+### 推荐工具
+- **VS Code** 或 **Cursor** (代码编辑器)
+- **Postman** 或 **Insomnia** (API 测试)
+- **MongoDB Compass** (数据库管理)
+- **Redis Desktop Manager** (Redis 管理)
+
+### VS Code 扩展推荐
+- ESLint
+- Prettier
+- GitLens
+- MongoDB for VS Code
+- REST Client
+
+## 📚 相关文档
+
+- 部署指南: [DEPLOYMENT.md](mdc:DEPLOYMENT.md)
+- 测试文档: [testing.mdc](mdc:.cursor/rules/testing.mdc)
+- 故障排查: [troubleshooting.mdc](mdc:.cursor/rules/troubleshooting.mdc)
+- 快速参考: [QUICK_REFERENCE.md](mdc:QUICK_REFERENCE.md)
+- 工具文档: [scripts/README.md](mdc:scripts/README.md)
+
+## 💡 最佳实践
+
+1. **小步提交**: 频繁提交小的、独立的更改
+2. **测试驱动**: 先写测试，再写代码
+3. **代码审查**: 重要更改前请同事审查
+4. **文档同步**: 代码更改时同步更新文档
+5. **日志记录**: 关键操作添加日志
+6. **错误处理**: 所有异步操作使用 try-catch
+7. **安全意识**: 不提交敏感信息到 Git
+8. **性能优化**: 关注数据库查询效率
+9. **代码复用**: 提取公共逻辑到工具函数
+10. **持续改进**: 定期重构和优化代码

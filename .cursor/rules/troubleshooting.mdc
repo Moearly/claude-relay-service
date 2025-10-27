@@ -29,18 +29,29 @@ sshpass -p 'jR74pQyDMTRt*eti7@' ssh -o ServerAliveInterval=60 root@156.229.163.8
 **错误**: `EADDRINUSE: address already in use 0.0.0.0:3000`
 
 **解决方法**:
+
+**推荐方式（自动处理）**:
+```bash
+# 使用部署脚本，会自动处理端口占用
+./scripts/deploy.sh
+```
+
+**手动处理**:
 ```bash
 # SSH 到服务器
 sshpass -p 'jR74pQyDMTRt*eti7@' ssh root@156.229.163.86
 
 # 查找占用端口的进程
-ps aux | grep 'node.*app.js' | grep -v grep
+netstat -tlnp | grep :3000
 
 # 杀掉进程
-pkill -f 'node.*app.js'
+pkill -f 'node.*server.js'
 
 # 或使用 PID
 kill -9 <PID>
+
+# 等待 2 秒
+sleep 2
 
 # 重新启动服务
 cd /opt/claude-relay-service
@@ -215,19 +226,37 @@ ls -la /opt/claude-relay-service/uploads/
 
 ## 日志查看技巧
 
-### 后端日志
+### 使用日志工具（推荐）
+```bash
+# 查看最近日志
+./scripts/view-logs.sh
+
+# 实时跟踪日志
+./scripts/view-logs.sh -f
+
+# 只看错误
+./scripts/view-logs.sh -e
+
+# 搜索特定关键词
+./scripts/view-logs.sh -s "MongoDB"
+
+# 实时跟踪错误（最有用）
+./scripts/view-logs.sh -f -e
+```
+
+### 手动查看日志
 ```bash
 # 实时查看所有日志
-tail -f /opt/claude-relay-service/logs/app.log
+tail -f /opt/claude-relay-service/logs/service.log
 
 # 查看错误日志
-tail -100 /opt/claude-relay-service/logs/service-error.log
+tail -100 /opt/claude-relay-service/logs/error.log
 
 # 搜索特定错误
-grep "ERROR" /opt/claude-relay-service/logs/app.log | tail -20
+grep -i error /opt/claude-relay-service/logs/service.log | tail -20
 
-# 查看最近的 API 请求
-grep "API Request" /opt/claude-relay-service/logs/app.log | tail -20
+# 查看最近的请求日志
+tail -100 /opt/claude-relay-service/logs/requests.log
 ```
 
 ### 前端日志
@@ -266,20 +295,41 @@ performance.getEntriesByType('resource')
 ## 紧急恢复流程
 
 ### 后端服务崩溃
+
+**快速诊断**:
 ```bash
-# 1. SSH 到服务器
-sshpass -p 'jR74pQyDMTRt*eti7@' ssh root@156.229.163.86
+# 1. 检查环境配置
+./scripts/check-env.sh
 
-# 2. 查看日志确认问题
-cd /opt/claude-relay-service
-tail -50 logs/service-error.log
+# 2. 查看错误日志
+./scripts/view-logs.sh -e -n 50
 
-# 3. 重启服务
-npm run service:restart
+# 3. 运行健康检查
+curl https://api.codewith.site/health
+```
 
-# 4. 如果仍然失败，恢复备份
-cp -r /tmp/backup-LATEST/* .
-npm run service:restart
+**恢复步骤**:
+```bash
+# 方式 1: 重新部署（推荐）
+./scripts/deploy.sh
+
+# 方式 2: 手动重启
+sshpass -p 'jR74pQyDMTRt*eti7@' ssh root@156.229.163.86 \
+  "cd /opt/claude-relay-service && npm run service:restart"
+
+# 方式 3: 回滚到备份
+sshpass -p 'jR74pQyDMTRt*eti7@' ssh root@156.229.163.86 \
+  "cd /opt/claude-relay-service && \
+   ls -lh backups/ && \
+   tar -xzf backups/backup_YYYYMMDD_HHMMSS.tar.gz && \
+   npm run service:restart"
+```
+
+**验证恢复**:
+```bash
+# 运行完整测试
+export ADMIN_TOKEN="your-token"
+node scripts/test-api.js
 ```
 
 ### 前端部署问题

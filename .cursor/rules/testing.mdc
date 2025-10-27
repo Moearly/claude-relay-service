@@ -1,0 +1,260 @@
+---
+description: Testing and API validation procedures
+---
+
+# 测试和 API 验证
+
+## 🧪 自动化 API 测试
+
+### 运行完整测试套件
+```bash
+cd /home/leiyi/codeSpace/ApiRelay/claude-relay-service
+
+# 基础测试（不需要认证的接口）
+node scripts/test-api.js
+
+# 完整测试（需要管理员 Token）
+export ADMIN_TOKEN="your-admin-token"
+node scripts/test-api.js
+
+# 指定测试服务器
+export API_BASE_URL="https://api.codewith.site"
+node scripts/test-api.js
+```
+
+### 测试覆盖范围
+
+自动化测试会验证以下接口：
+
+1. **健康检查** (`/health`)
+   - 验证服务是否正常运行
+   - 不需要认证
+
+2. **用户管理** (`/admin/users`)
+   - 获取用户列表
+   - 导出用户数据（JSON/CSV）
+   - 用户使用统计
+   - 需要管理员认证
+
+3. **订单管理** (`/admin/orders`)
+   - 获取订单列表
+   - 获取订单详情
+   - 需要管理员认证
+
+4. **公告管理** (`/admin/announcements`)
+   - 获取公告列表
+   - 需要管理员认证
+
+5. **套餐管理** (`/admin/subscription-plans`)
+   - 获取套餐列表
+   - 需要管理员认证
+
+6. **系统统计** (`/admin/stats`)
+   - 获取系统统计数据
+   - 需要管理员认证
+
+7. **CORS 配置**
+   - 验证跨域请求头
+   - 验证预检请求
+
+### 测试输出示例
+
+```
+🧪 API 接口健康检查
+
+目标服务器: https://api.codewith.site
+认证状态: 已配置
+
+✓ 健康检查
+✓ 获取用户列表
+✓ 获取订单列表
+✓ 获取公告列表
+✓ 获取套餐列表
+✓ 获取系统统计
+✓ 导出用户数据（JSON）
+✓ 测试 CORS（预检请求）
+
+📊 测试结果统计
+
+总计: 8
+通过: 8
+失败: 0
+跳过: 0
+
+成功率: 100.00%
+```
+
+## 🔍 手动测试接口
+
+### 健康检查
+```bash
+curl https://api.codewith.site/health
+```
+
+### 测试管理员接口
+```bash
+# 设置 Token
+TOKEN="your-admin-token"
+
+# 获取用户列表
+curl -H "Authorization: Bearer $TOKEN" \
+     https://api.codewith.site/admin/users
+
+# 获取订单列表
+curl -H "Authorization: Bearer $TOKEN" \
+     https://api.codewith.site/admin/orders
+
+# 获取公告列表
+curl -H "Authorization: Bearer $TOKEN" \
+     https://api.codewith.site/admin/announcements
+```
+
+### 测试 CORS
+```bash
+# 测试预检请求
+curl -I -X OPTIONS \
+     -H "Origin: https://codewith.site" \
+     -H "Access-Control-Request-Method: GET" \
+     -H "Access-Control-Request-Headers: authorization" \
+     https://api.codewith.site/admin/users
+
+# 应该返回：
+# Access-Control-Allow-Origin: https://codewith.site
+# Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS
+# Access-Control-Allow-Headers: authorization, content-type
+```
+
+## 📊 部署后验证清单
+
+每次部署后，**必须**完成以下验证：
+
+### 1. 服务状态检查
+```bash
+# 检查进程
+ps aux | grep 'node.*server.js'
+
+# 检查端口
+netstat -tlnp | grep :3000
+
+# 检查健康状态
+curl https://api.codewith.site/health
+```
+
+### 2. 环境配置检查
+```bash
+./scripts/check-env.sh
+```
+
+应该验证：
+- ✅ MONGODB_URI 已配置
+- ✅ CORS_ORIGIN 包含前端域名
+- ✅ JWT_SECRET 已配置
+- ✅ MongoDB 服务运行中
+- ✅ Redis 服务运行中（可选）
+
+### 3. API 接口测试
+```bash
+export ADMIN_TOKEN="your-token"
+node scripts/test-api.js
+```
+
+应该达到：
+- ✅ 成功率 >= 90%
+- ✅ 所有核心接口通过
+
+### 4. 日志检查
+```bash
+./scripts/view-logs.sh -e -n 50
+```
+
+应该确认：
+- ✅ 没有严重错误（ERROR）
+- ✅ 数据库连接成功
+- ✅ Redis 连接成功（如果启用）
+
+### 5. 前端功能测试
+
+在浏览器中测试：
+- ✅ 登录功能正常
+- ✅ 用户列表加载正常
+- ✅ 订单列表加载正常
+- ✅ 公告管理正常
+- ✅ 没有 CORS 错误
+- ✅ 没有 401/404 错误
+
+## 🐛 测试失败处理
+
+### 如果测试失败
+
+1. **查看详细错误信息**
+   ```bash
+   node scripts/test-api.js 2>&1 | tee test-results.log
+   ```
+
+2. **检查服务日志**
+   ```bash
+   ./scripts/view-logs.sh -e -n 100
+   ```
+
+3. **验证环境配置**
+   ```bash
+   ./scripts/check-env.sh
+   ```
+
+4. **手动测试失败的接口**
+   ```bash
+   curl -v -H "Authorization: Bearer $TOKEN" \
+        https://api.codewith.site/admin/failing-endpoint
+   ```
+
+5. **如果问题严重，回滚部署**
+   ```bash
+   ssh root@156.229.163.86
+   cd /opt/claude-relay-service
+   ls backups/
+   tar -xzf backups/backup_YYYYMMDD_HHMMSS.tar.gz
+   npm run service:restart
+   ```
+
+## 📝 添加新的测试用例
+
+编辑 [scripts/test-api.js](mdc:scripts/test-api.js)，在 `testCases` 数组中添加：
+
+```javascript
+{
+  name: '测试新接口',
+  method: 'GET',  // 或 'POST', 'PUT', 'DELETE'
+  url: '/admin/new-endpoint',
+  auth: true,     // 是否需要认证
+  expect: { 
+    status: 200,  // 期望的状态码
+    hasData: true // 是否期望有数据
+  }
+}
+```
+
+## 🔄 持续集成建议
+
+### 部署前自动测试
+```bash
+# 在部署脚本中添加测试步骤
+npm run lint           # 代码检查
+npm run test          # 单元测试（如果有）
+node scripts/test-api.js  # API 测试
+```
+
+### 定期健康检查
+```bash
+# 设置 cron job 定期运行测试
+# 编辑 crontab
+crontab -e
+
+# 每小时运行一次健康检查
+0 * * * * cd /opt/claude-relay-service && node scripts/test-api.js >> logs/health-check.log 2>&1
+```
+
+## 📚 相关文档
+
+- 完整部署指南: [DEPLOYMENT.md](mdc:DEPLOYMENT.md)
+- 工具使用文档: [scripts/README.md](mdc:scripts/README.md)
+- 快速参考: [QUICK_REFERENCE.md](mdc:QUICK_REFERENCE.md)

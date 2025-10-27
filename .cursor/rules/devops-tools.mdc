@@ -1,0 +1,443 @@
+---
+description: DevOps tools and automation scripts usage
+---
+
+# 运维工具和自动化脚本
+
+## 📦 工具概览
+
+ApiRelay 提供了一套完整的自动化运维工具，位于 [scripts/](mdc:scripts/) 目录：
+
+1. **deploy.sh** - 自动化部署脚本
+2. **test-api.js** - API 接口测试
+3. **view-logs.sh** - 日志查看工具
+4. **check-env.sh** - 环境配置检查
+
+## 🚀 deploy.sh - 自动化部署
+
+### 基本用法
+```bash
+cd /home/leiyi/codeSpace/ApiRelay/claude-relay-service
+
+# 标准部署
+./scripts/deploy.sh
+
+# 强制重新安装依赖
+./scripts/deploy.sh --force
+```
+
+### 执行流程
+1. ✅ 检查本地环境（git, node, npm, sshpass）
+2. ✅ 检查 Git 工作区状态
+3. ✅ 验证服务器连接和目录
+4. ✅ 检查服务器环境变量
+5. ✅ 备份当前版本（保存到 backups/ 目录）
+6. ✅ 上传代码文件到服务器
+7. ✅ 安装或更新依赖
+8. ✅ 查找并终止占用端口的进程
+9. ✅ 启动新服务
+10. ✅ 健康检查（最多重试 5 次）
+11. ✅ 运行 API 测试
+12. ✅ 检查错误日志
+
+### 输出示例
+```
+╔═══════════════════════════════════════════╗
+║     ApiRelay 后端自动化部署脚本          ║
+╚═══════════════════════════════════════════╝
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📦 检查本地环境
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+[SUCCESS] ✓ sshpass
+[SUCCESS] ✓ ssh
+[SUCCESS] ✓ git
+[SUCCESS] ✓ node
+[SUCCESS] Git 工作区干净
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🎉 部署成功！
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+```
+
+### 何时使用
+- ✅ 每次代码更新后
+- ✅ 修复 bug 后
+- ✅ 添加新功能后
+- ✅ 服务崩溃需要恢复时
+- ✅ 端口被占用时（自动处理）
+
+### 优势
+- 🔒 自动备份，安全可靠
+- ⚡ 一键完成所有步骤
+- 🔍 自动验证部署结果
+- 🛡️ 自动处理常见问题
+- 📊 详细的执行日志
+
+## 🧪 test-api.js - API 接口测试
+
+### 基本用法
+```bash
+# 基础测试（不需要认证）
+node scripts/test-api.js
+
+# 完整测试（需要管理员 Token）
+export ADMIN_TOKEN="your-admin-token"
+node scripts/test-api.js
+
+# 指定测试服务器
+export API_BASE_URL="https://api.codewith.site"
+export ADMIN_TOKEN="your-token"
+node scripts/test-api.js
+```
+
+### 测试覆盖
+- ✅ 健康检查 (`/health`)
+- ✅ 用户管理 (`/admin/users`)
+- ✅ 订单管理 (`/admin/orders`)
+- ✅ 公告管理 (`/admin/announcements`)
+- ✅ 套餐管理 (`/admin/subscription-plans`)
+- ✅ 系统统计 (`/admin/stats`)
+- ✅ 数据导出 (`/admin/users/export`)
+- ✅ CORS 配置
+
+### 输出示例
+```
+🧪 API 接口健康检查
+
+目标服务器: https://api.codewith.site
+认证状态: 已配置
+
+✓ 健康检查
+✓ 获取用户列表
+✓ 获取订单列表
+✓ 获取公告列表
+✓ 获取套餐列表
+✓ 获取系统统计
+✓ 导出用户数据（JSON）
+✓ 测试 CORS（预检请求）
+
+📊 测试结果统计
+
+总计: 8
+通过: 8
+失败: 0
+跳过: 0
+
+成功率: 100.00%
+```
+
+### 何时使用
+- ✅ 部署后验证
+- ✅ 修改接口后测试
+- ✅ 定期健康检查
+- ✅ 问题排查时
+- ✅ 添加新接口后
+
+### 添加新测试
+编辑 [scripts/test-api.js](mdc:scripts/test-api.js)，在 `testCases` 数组中添加：
+
+```javascript
+{
+  name: '测试新接口',
+  method: 'GET',
+  url: '/admin/new-endpoint',
+  auth: true,
+  expect: { status: 200, hasData: true }
+}
+```
+
+## 📋 view-logs.sh - 日志查看工具
+
+### 基本用法
+```bash
+# 查看最近 50 行日志（默认）
+./scripts/view-logs.sh
+
+# 实时跟踪日志
+./scripts/view-logs.sh -f
+
+# 只显示错误日志
+./scripts/view-logs.sh -e
+
+# 显示最后 100 行
+./scripts/view-logs.sh -n 100
+
+# 搜索包含 "MongoDB" 的日志
+./scripts/view-logs.sh -s "MongoDB"
+
+# 组合使用：实时跟踪错误
+./scripts/view-logs.sh -f -e
+```
+
+### 选项说明
+- `-f, --follow`: 实时跟踪日志（类似 `tail -f`）
+- `-e, --error`: 只显示错误和警告
+- `-n, --lines NUM`: 显示最后 NUM 行
+- `-s, --search TEXT`: 搜索包含 TEXT 的日志
+- `-h, --help`: 显示帮助信息
+
+### 常用场景
+
+**场景 1: 查看最近的错误**
+```bash
+./scripts/view-logs.sh -e -n 50
+```
+
+**场景 2: 实时监控服务**
+```bash
+./scripts/view-logs.sh -f
+```
+
+**场景 3: 调试特定功能**
+```bash
+./scripts/view-logs.sh -s "订单" -n 100
+```
+
+**场景 4: 排查数据库问题**
+```bash
+./scripts/view-logs.sh -s "MongoDB" -e
+```
+
+### 输出示例
+```
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📋 ApiRelay 服务日志
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+服务状态:
+root     1234567  0.5  2.1 1234567 123456 ?  Ssl  10:00   0:05 node src/server.js
+
+日志内容:
+[2025-01-27 10:00:00] INFO: Server started on port 3000
+[2025-01-27 10:00:01] INFO: MongoDB connected
+[2025-01-27 10:00:02] INFO: Redis connected
+```
+
+## 🔍 check-env.sh - 环境配置检查
+
+### 基本用法
+```bash
+./scripts/check-env.sh
+```
+
+### 检查内容
+1. **必需的环境变量**
+   - MONGODB_URI
+   - CORS_ORIGIN
+   - JWT_SECRET
+   - ADMIN_JWT_SECRET
+
+2. **可选的环境变量**
+   - REDIS_HOST
+   - REDIS_PORT
+   - REDIS_PASSWORD
+   - PORT
+   - NODE_ENV
+
+3. **服务状态**
+   - MongoDB 服务和连接
+   - Redis 服务和连接
+   - Node.js 服务和端口
+
+### 输出示例
+```
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🔍 环境配置检查
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+必需的环境变量:
+
+  ✓ MONGODB_URI = mongodb://localhost:27017/claude-relay
+  ✓ CORS_ORIGIN = https://codewith.site,https://www.codewith.site
+  ✓ JWT_SECRET = [已设置]
+  ✓ ADMIN_JWT_SECRET = [已设置]
+
+可选的环境变量:
+
+  ✓ REDIS_HOST = localhost
+  ✓ REDIS_PORT = 6379
+  ○ REDIS_PASSWORD = [未设置]
+  ✓ PORT = 3000
+  ✓ NODE_ENV = production
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🔌 服务状态检查
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+MongoDB:
+  ✓ MongoDB 服务运行中
+  ✓ 连接测试成功
+
+Redis:
+  ✓ Redis 服务运行中
+  ✓ 连接测试成功
+
+Node.js 服务:
+  ✓ 服务运行中 (PID: 1234567)
+  ✓ 端口 3000 监听中
+```
+
+### 何时使用
+- ✅ 部署前检查
+- ✅ 服务启动失败时
+- ✅ 数据库连接问题时
+- ✅ CORS 错误时
+- ✅ 定期健康检查
+
+## 🔄 典型工作流
+
+### 日常开发部署
+```bash
+# 1. 开发完成
+git add . && git commit -m "feat: 新功能"
+git push
+
+# 2. 一键部署
+./scripts/deploy.sh
+
+# 部署脚本会自动：
+# - 检查环境
+# - 上传代码
+# - 重启服务
+# - 运行测试
+# - 验证部署
+```
+
+### 问题排查流程
+```bash
+# 1. 检查环境配置
+./scripts/check-env.sh
+
+# 2. 查看错误日志
+./scripts/view-logs.sh -e -n 100
+
+# 3. 搜索特定错误
+./scripts/view-logs.sh -s "错误关键词"
+
+# 4. 实时监控
+./scripts/view-logs.sh -f -e
+
+# 5. 运行测试定位问题
+export ADMIN_TOKEN="your-token"
+node scripts/test-api.js
+```
+
+### 紧急恢复流程
+```bash
+# 1. 快速诊断
+./scripts/check-env.sh
+./scripts/view-logs.sh -e -n 50
+
+# 2. 重新部署
+./scripts/deploy.sh
+
+# 3. 验证恢复
+node scripts/test-api.js
+```
+
+## 📝 工具维护
+
+### 更新部署脚本
+编辑 [scripts/deploy.sh](mdc:scripts/deploy.sh)，修改需要上传的文件列表：
+
+```bash
+# 需要上传的文件列表
+local files=(
+    "src/routes/admin.js"
+    "src/routes/subscriptionRoutes.js"
+    "src/middleware/auth.js"
+    "src/server.js"
+    "package.json"
+    # 添加新文件
+    "src/routes/new-route.js"
+)
+```
+
+### 添加新的测试用例
+编辑 [scripts/test-api.js](mdc:scripts/test-api.js)：
+
+```javascript
+const testCases = [
+  // 现有测试...
+  
+  // 添加新测试
+  {
+    name: '测试新功能',
+    method: 'POST',
+    url: '/admin/new-feature',
+    auth: true,
+    expect: { status: 200 }
+  }
+];
+```
+
+### 自定义日志过滤
+编辑 [scripts/view-logs.sh](mdc:scripts/view-logs.sh)：
+
+```bash
+if [[ "$ERROR_ONLY" == true ]]; then
+    # 自定义错误关键词
+    cmd+=" | grep -iE '(error|warning|fail|timeout|crash)'"
+fi
+```
+
+## 🛡️ 安全注意事项
+
+### 敏感信息保护
+- ⚠️ 脚本中包含服务器密码
+- ⚠️ 不要将脚本提交到公开仓库
+- ⚠️ 考虑使用环境变量存储密码
+- ⚠️ 使用 SSH 密钥认证更安全
+
+### 推荐做法
+```bash
+# 方式 1: 使用环境变量
+export SERVER_PASSWORD="your-password"
+# 在脚本中使用 $SERVER_PASSWORD
+
+# 方式 2: 使用 SSH 密钥
+ssh-keygen -t rsa
+ssh-copy-id root@156.229.163.86
+# 然后可以不用密码直接 ssh
+```
+
+## 📚 相关文档
+
+- 完整部署指南: [DEPLOYMENT.md](mdc:DEPLOYMENT.md)
+- 工具使用文档: [scripts/README.md](mdc:scripts/README.md)
+- 快速参考: [QUICK_REFERENCE.md](mdc:QUICK_REFERENCE.md)
+- 测试文档: [testing.mdc](mdc:.cursor/rules/testing.mdc)
+- 开发流程: [development-workflow.mdc](mdc:.cursor/rules/development-workflow.mdc)
+
+## 💡 最佳实践
+
+1. **始终使用自动化部署脚本**
+   - 不要手动复制文件
+   - 让脚本处理所有步骤
+
+2. **部署前运行测试**
+   ```bash
+   node scripts/test-api.js
+   ```
+
+3. **部署后验证**
+   ```bash
+   ./scripts/deploy.sh  # 会自动验证
+   ```
+
+4. **定期查看日志**
+   ```bash
+   ./scripts/view-logs.sh -e
+   ```
+
+5. **遇到问题先检查环境**
+   ```bash
+   ./scripts/check-env.sh
+   ```
+
+6. **保持工具更新**
+   - 根据项目需求更新脚本
+   - 添加新的测试用例
+   - 优化部署流程
