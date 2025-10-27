@@ -9929,3 +9929,132 @@ router.delete('/announcements/:id', authenticateAdmin, async (req, res) => {
   }
 })
 
+// ==================== 邮件设置管理 ====================
+
+// 获取邮件设置
+router.get('/email-settings', authenticateAdmin, async (req, res) => {
+  try {
+    const EmailSettings = require('../models/EmailSettings')
+    const settings = await EmailSettings.getSettings()
+    
+    // 不返回敏感信息（密码）
+    const safeSettings = {
+      provider: settings.provider,
+      enabled: settings.enabled,
+      resendApiKey: settings.resendApiKey ? '***' + settings.resendApiKey.slice(-4) : '',
+      smtpHost: settings.smtpHost,
+      smtpPort: settings.smtpPort,
+      smtpUser: settings.smtpUser,
+      smtpSecure: settings.smtpSecure,
+      fromName: settings.fromName,
+      fromEmail: settings.fromEmail,
+      updatedAt: settings.updatedAt
+    }
+    
+    res.json({
+      success: true,
+      data: safeSettings
+    })
+  } catch (error) {
+    logger.error('❌ 获取邮件设置失败:', error)
+    res.status(500).json({
+      success: false,
+      error: error.message
+    })
+  }
+})
+
+// 更新邮件设置
+router.put('/email-settings', authenticateAdmin, async (req, res) => {
+  try {
+    const EmailSettings = require('../models/EmailSettings')
+    const emailService = require('../services/emailService')
+    const {
+      provider,
+      enabled,
+      resendApiKey,
+      smtpHost,
+      smtpPort,
+      smtpUser,
+      smtpPassword,
+      smtpSecure,
+      fromName,
+      fromEmail
+    } = req.body
+    
+    const settings = await EmailSettings.getSettings()
+    
+    // 更新字段
+    if (provider !== undefined) settings.provider = provider
+    if (enabled !== undefined) settings.enabled = enabled
+    if (resendApiKey !== undefined) settings.resendApiKey = resendApiKey
+    if (smtpHost !== undefined) settings.smtpHost = smtpHost
+    if (smtpPort !== undefined) settings.smtpPort = smtpPort
+    if (smtpUser !== undefined) settings.smtpUser = smtpUser
+    if (smtpPassword !== undefined && smtpPassword !== '') {
+      settings.smtpPassword = smtpPassword
+    }
+    if (smtpSecure !== undefined) settings.smtpSecure = smtpSecure
+    if (fromName !== undefined) settings.fromName = fromName
+    if (fromEmail !== undefined) settings.fromEmail = fromEmail
+    
+    settings.updatedBy = req.admin.username
+    settings.updatedAt = new Date()
+    
+    await settings.save()
+    
+    // 重新加载邮件服务
+    await emailService.reloadSettings()
+    
+    logger.info(`✅ 管理员 ${req.admin.username} 更新邮件设置`)
+    
+    res.json({
+      success: true,
+      message: '邮件设置已保存'
+    })
+  } catch (error) {
+    logger.error('❌ 更新邮件设置失败:', error)
+    res.status(500).json({
+      success: false,
+      error: error.message
+    })
+  }
+})
+
+// 发送测试邮件
+router.post('/email-settings/test', authenticateAdmin, async (req, res) => {
+  try {
+    const emailService = require('../services/emailService')
+    const { to } = req.body
+    
+    if (!to) {
+      return res.status(400).json({
+        success: false,
+        error: '请提供收件人邮箱地址'
+      })
+    }
+    
+    // 重新加载设置以确保使用最新配置
+    await emailService.reloadSettings()
+    
+    // 发送测试邮件
+    const result = await emailService.sendTestEmail(to)
+    
+    logger.info(`✅ 管理员 ${req.admin.username} 发送测试邮件到 ${to}`)
+    
+    res.json({
+      success: true,
+      message: '测试邮件已发送',
+      data: result
+    })
+  } catch (error) {
+    logger.error('❌ 发送测试邮件失败:', error)
+    res.status(500).json({
+      success: false,
+      error: error.message,
+      message: '发送失败：' + error.message
+    })
+  }
+})
+
+module.exports = router
