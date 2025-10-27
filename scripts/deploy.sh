@@ -130,7 +130,8 @@ upload_code() {
         "src/routes/admin.js"
         "src/routes/subscriptionRoutes.js"
         "src/middleware/auth.js"
-        "src/server.js"
+        "src/models/redis.js"
+        "src/app.js"
         "package.json"
     )
     
