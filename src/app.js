@@ -271,6 +271,8 @@ class Application {
       this.app.use('/users/subscription', subscriptionRoutes)
       this.app.use('/users/invoices', invoiceRoutes)
       this.app.use('/announcements', announcementsRoutes)
+      // 📧 邮件管理路由
+      this.app.use('/admin/email', require('./routes/emailRoutes'))
       // Gemini 路由：同时支持标准格式和原有格式
       this.app.use('/gemini', standardGeminiRoutes) // 标准 Gemini API 格式路由
       this.app.use('/gemini', geminiRoutes) // 保留原有路径以保持向后兼容

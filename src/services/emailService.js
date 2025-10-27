@@ -1,5 +1,8 @@
 const nodemailer = require('nodemailer');
 const EmailSettings = require('../models/EmailSettings');
+const EmailLog = require('../models/EmailLog');
+const EmailTemplate = require('../models/EmailTemplate');
+const marked = require('marked');
 
 class EmailService {
   constructor() {
@@ -80,34 +83,84 @@ class EmailService {
   }
 
   /**
-   * 发送邮件
+   * 渲染模板变量
    */
-  async sendEmail({ to, subject, html, text }) {
-    // 重新加载设置以确保使用最新配置
-    await this.reloadSettings();
-
-    if (!this.settings || !this.settings.enabled) {
-      throw new Error('邮件服务未启用，请先在系统设置中启用邮件服务');
+  renderTemplate(content, variables = {}) {
+    let rendered = content;
+    for (const [key, value] of Object.entries(variables)) {
+      const regex = new RegExp(`{{\\s*${key}\\s*}}`, 'g');
+      rendered = rendered.replace(regex, value || '');
     }
+    return rendered;
+  }
 
-    if (!this.transporter) {
-      throw new Error('邮件传输器未初始化，请检查邮件配置是否正确');
-    }
-
-    const mailOptions = {
-      from: `"${this.settings.fromName}" <${this.settings.fromEmail}>`,
+  /**
+   * 发送邮件（带日志记录）
+   */
+  async sendEmail({ to, subject, html, text, type = 'custom', templateId = null, templateName = '', sentBy = 'system', metadata = {} }) {
+    // 创建日志记录
+    const emailLog = new EmailLog({
       to,
       subject,
-      html,
-      text: text || html.replace(/<[^>]*>/g, ''), // 简单的 HTML 转文本
-    };
+      type,
+      templateId,
+      templateName,
+      status: 'pending',
+      provider: this.settings?.provider || 'resend',
+      from: {
+        name: this.settings?.fromName || '',
+        email: this.settings?.fromEmail || ''
+      },
+      sentBy,
+      metadata
+    });
 
     try {
+      // 重新加载设置以确保使用最新配置
+      await this.reloadSettings();
+
+      if (!this.settings || !this.settings.enabled) {
+        throw new Error('邮件服务未启用，请先在系统设置中启用邮件服务');
+      }
+
+      if (!this.transporter) {
+        throw new Error('邮件传输器未初始化，请检查邮件配置是否正确');
+      }
+
+      const mailOptions = {
+        from: `"${this.settings.fromName}" <${this.settings.fromEmail}>`,
+        to,
+        subject,
+        html,
+        text: text || html.replace(/<[^>]*>/g, ''), // 简单的 HTML 转文本
+      };
+
       const info = await this.transporter.sendMail(mailOptions);
       console.log('✅ Email sent:', info.messageId);
-      return { success: true, messageId: info.messageId };
+
+      // 更新日志为成功
+      emailLog.status = 'sent';
+      emailLog.messageId = info.messageId;
+      emailLog.sentAt = new Date();
+      await emailLog.save();
+
+      // 如果使用了模板，更新模板使用次数
+      if (templateId) {
+        await EmailTemplate.findByIdAndUpdate(templateId, {
+          $inc: { usageCount: 1 },
+          lastUsedAt: new Date()
+        });
+      }
+
+      return { success: true, messageId: info.messageId, logId: emailLog._id };
     } catch (error) {
       console.error('❌ Failed to send email:', error);
+
+      // 更新日志为失败
+      emailLog.status = 'failed';
+      emailLog.error = error.message;
+      await emailLog.save();
+
       // 提供更友好的错误信息
       if (error.code === 'EAUTH') {
         throw new Error('邮件服务认证失败，请检查 API Key 或 SMTP 用户名密码是否正确');
@@ -117,6 +170,39 @@ class EmailService {
         throw new Error(`发送邮件失败：${error.message}`);
       }
     }
+  }
+
+  /**
+   * 使用模板发送邮件
+   */
+  async sendEmailWithTemplate({ to, templateSlug, variables = {}, sentBy = 'system', metadata = {} }) {
+    // 获取模板
+    const template = await EmailTemplate.findOne({ slug: templateSlug, status: 'active' });
+    if (!template) {
+      throw new Error(`模板 ${templateSlug} 不存在或未激活`);
+    }
+
+    // 渲染主题和内容
+    const subject = this.renderTemplate(template.subject, variables);
+    let content = this.renderTemplate(template.content, variables);
+
+    // 如果是 Markdown，转换为 HTML
+    let html = content;
+    if (template.contentType === 'markdown') {
+      html = marked.parse(content);
+    }
+
+    // 发送邮件
+    return await this.sendEmail({
+      to,
+      subject,
+      html,
+      type: template.type,
+      templateId: template._id,
+      templateName: template.name,
+      sentBy,
+      metadata
+    });
   }
 
   /**
@@ -180,6 +266,8 @@ class EmailService {
       to,
       subject: '✅ AI Code Relay - 邮件服务测试',
       html,
+      type: 'test',
+      sentBy: 'admin'
     });
   }
 
@@ -223,6 +311,8 @@ class EmailService {
       to,
       subject: '欢迎加入 AI Code Relay',
       html,
+      type: 'welcome',
+      sentBy: 'system'
     });
   }
 
