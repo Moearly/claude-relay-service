@@ -1,0 +1,51 @@
+scripts/
+│
+├── 📄 manage.js                          # 服务管理主脚本
+├── 📄 README.md                          # 完整文档
+├── 📄 REORGANIZATION_SUMMARY.md          # 重组总结
+├── 📄 QUICK_REFERENCE.md                 # 快速参考
+│
+├── 📁 deployment/                        # 部署相关 (2个脚本)
+│   ├── deploy-optimized.sh              # ⭐ 生产部署脚本
+│   └── check-env.sh                     # 环境检查
+│
+├── 📁 testing/                           # 测试相关 (11个脚本)
+│   ├── test-api.js                      # ⭐ 主要API测试
+│   ├── generate-test-data.js            # 测试数据生成
+│   ├── test-account-display.js          # 账户显示测试
+│   ├── test-api-response.js             # API响应测试
+│   ├── test-bedrock-models.js           # Bedrock模型测试
+│   ├── test-dedicated-accounts.js       # 专用账户测试
+│   ├── test-gemini-refresh.js           # Gemini刷新测试
+│   ├── test-group-scheduling.js         # 分组调度测试
+│   ├── test-model-mapping.js            # 模型映射测试
+│   ├── test-pricing-fallback.js         # 价格回退测试
+│   └── test-window-remaining.js         # 窗口剩余测试
+│
+├── 📁 maintenance/                       # 维护相关 (5个脚本)
+│   ├── init-database.js                 # 数据库初始化
+│   ├── init-email-templates.js          # 邮件模板初始化
+│   ├── update-model-pricing.js          # 更新模型价格
+│   ├── migrate-apikey-expiry.js         # API Key迁移
+│   └── fix-usage-stats.js               # 修复使用统计
+│
+└── 📁 tools/                             # 运维工具 (10个脚本)
+    ├── view-logs.sh                     # ⭐ 日志查看
+    ├── data-transfer-enhanced.js        # ⭐ 数据导入导出
+    ├── check-redis-keys.js              # Redis键检查
+    ├── analyze-log-sessions.js          # 日志会话分析
+    ├── manage-session-windows.js        # 会话窗口管理
+    ├── status-unified.sh                # 统一状态检查
+    ├── monitor-enhanced.sh              # 增强监控
+    ├── check-gemini-status.sh           # Gemini状态检查
+    ├── refresh-gemini-token.sh          # Gemini Token刷新
+    └── setup-email.sh                   # 邮件服务设置
+
+总计: 29 个脚本文件
+  - 部署脚本: 2 个
+  - 测试脚本: 11 个
+  - 维护脚本: 5 个
+  - 运维工具: 10 个
+  - 核心管理: 1 个
+
+⭐ 标记表示最常用的脚本
