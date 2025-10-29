@@ -1,5 +1,6 @@
 const { User, SubscriptionPlan, Order } = require('../models')
 const logger = require('../utils/logger')
+const emailService = require('./emailService')
 
 class UserSubscriptionService {
   /**
@@ -170,6 +171,21 @@ class UserSubscriptionService {
       await order.save()
       
       logger.success(`✅ Activated subscription for user ${user.username}: ${plan.planId}`)
+      
+      // 发送订单确认邮件（不阻塞激活流程）
+      emailService.sendEmailWithTemplate({
+        to: user.email,
+        templateSlug: 'order-confirmation',
+        variables: {
+          username: user.displayName || user.username,
+          orderNumber: order.orderId,
+          planName: plan.displayName,
+          amount: order.amount.toString(),
+          siteName: 'AI Code Relay'
+        }
+      }).catch(err => {
+        logger.error('❌ 发送订单确认邮件失败:', err)
+      })
       
       return user.subscription
     } catch (error) {

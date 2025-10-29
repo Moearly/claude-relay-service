@@ -2,6 +2,7 @@ const { User, CreditRecord } = require('../models')
 const logger = require('../utils/logger')
 const jwt = require('jsonwebtoken')
 const config = require('../../config/config')
+const emailService = require('./emailService')
 
 /**
  * 用户服务
@@ -67,6 +68,18 @@ class UserService {
       })
 
       logger.info(`✅ 新用户注册成功: ${username} (${email})`)
+
+      // 发送欢迎邮件（不阻塞注册流程）
+      emailService.sendEmailWithTemplate({
+        to: email,
+        templateSlug: 'welcome-new-user',
+        variables: {
+          username: user.displayName || username,
+          siteName: 'AI Code Relay'
+        }
+      }).catch(err => {
+        logger.error('❌ 发送欢迎邮件失败:', err)
+      })
 
       return {
         success: true,
@@ -395,6 +408,22 @@ class UserService {
         description
       })
 
+      // 发送积分充值通知邮件（不阻塞充值流程）
+      if (type === 'refill' || type === 'purchase') {
+        emailService.sendEmailWithTemplate({
+          to: user.email,
+          templateSlug: 'credits-recharged',
+          variables: {
+            username: user.displayName || user.username,
+            amount: amount.toString(),
+            balance: user.credits.toString(),
+            siteName: 'AI Code Relay'
+          }
+        }).catch(err => {
+          logger.error('❌ 发送积分充值邮件失败:', err)
+        })
+      }
+
       return {
         success: true,
         credits: user.credits
@@ -405,6 +434,100 @@ class UserService {
         success: false,
         error: 'Failed to add credits',
         message: '积分充值失败'
+      }
+    }
+  }
+
+  /**
+   * 请求密码重置
+   */
+  async requestPasswordReset(email) {
+    try {
+      const user = await User.findOne({ email })
+      
+      if (!user) {
+        // 为了安全，即使用户不存在也返回成功
+        return {
+          success: true,
+          message: '如果该邮箱已注册，您将收到密码重置邮件'
+        }
+      }
+
+      // 生成重置令牌（24小时有效）
+      const resetToken = require('crypto').randomBytes(32).toString('hex')
+      const resetTokenExpiry = Date.now() + 24 * 60 * 60 * 1000 // 24小时
+
+      user.resetPasswordToken = resetToken
+      user.resetPasswordExpires = resetTokenExpiry
+      await user.save()
+
+      // 生成重置链接
+      const resetLink = `${process.env.FRONTEND_URL || 'https://commercial-website.vercel.app'}/reset-password?token=${resetToken}`
+
+      // 发送密码重置邮件
+      await emailService.sendEmailWithTemplate({
+        to: user.email,
+        templateSlug: 'password-reset',
+        variables: {
+          username: user.displayName || user.username,
+          resetLink,
+          expiryTime: '24',
+          siteName: 'AI Code Relay'
+        }
+      })
+
+      logger.info(`✅ 密码重置邮件已发送: ${email}`)
+
+      return {
+        success: true,
+        message: '密码重置邮件已发送，请查收'
+      }
+    } catch (error) {
+      logger.error('❌ 请求密码重置失败:', error)
+      return {
+        success: false,
+        error: 'Password reset failed',
+        message: '密码重置请求失败，请稍后重试'
+      }
+    }
+  }
+
+  /**
+   * 重置密码
+   */
+  async resetPassword(token, newPassword) {
+    try {
+      const user = await User.findOne({
+        resetPasswordToken: token,
+        resetPasswordExpires: { $gt: Date.now() }
+      })
+
+      if (!user) {
+        return {
+          success: false,
+          error: 'Invalid or expired token',
+          message: '重置链接无效或已过期'
+        }
+      }
+
+      // 更新密码
+      user.password = newPassword
+      user.resetPasswordToken = undefined
+      user.resetPasswordExpires = undefined
+      await user.save()
+
+      logger.info(`✅ 密码重置成功: ${user.username}`)
+
+      return {
+        success: true,
+        message: '密码重置成功，请使用新密码登录'
+      }
+    } catch (error) {
+      logger.error('❌ 重置密码失败:', error)
+      return {
+        success: false,
+        error: 'Password reset failed',
+        message: '密码重置失败，请稍后重试'
       }
     }
   }
@@ -469,6 +592,18 @@ class UserService {
           })
 
           logger.info(`✅ OAuth新用户注册: ${provider} - ${email}`)
+          
+          // 发送欢迎邮件（不阻塞登录流程）
+          emailService.sendEmailWithTemplate({
+            to: email,
+            templateSlug: 'welcome-new-user',
+            variables: {
+              username: user.displayName || name || email,
+              siteName: 'AI Code Relay'
+            }
+          }).catch(err => {
+            logger.error('❌ 发送欢迎邮件失败:', err)
+          })
         }
       }
 

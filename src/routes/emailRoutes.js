@@ -289,25 +289,92 @@ router.put('/templates/:id', authenticateAdmin, async (req, res) => {
       });
     }
 
-    // 系统模板不允许修改某些字段
-    if (template.isSystem) {
-      const { slug, type, isSystem, ...updates } = req.body;
-      Object.assign(template, updates);
-    } else {
-      Object.assign(template, req.body);
+    // 准备更新数据
+    const updateData = {};
+    const allowedFields = ['name', 'subject', 'content', 'contentType', 'variables', 'category', 'description', 'status'];
+    const systemProtectedFields = ['slug', 'type', 'isSystem'];
+    
+    // 调试日志
+    logger.info(`📝 收到更新请求，字段: ${Object.keys(req.body).join(', ')}`);
+    if (req.body.variables) {
+      logger.info(`📝 variables 类型: ${typeof req.body.variables}, 值: ${JSON.stringify(req.body.variables).substring(0, 200)}`);
     }
+    
+    Object.keys(req.body).forEach(key => {
+      // 跳过系统保护字段（如果是系统模板）
+      if (template.isSystem && systemProtectedFields.includes(key)) {
+        return;
+      }
+      
+      // 只更新允许的字段
+      if (allowedFields.includes(key)) {
+        let value = req.body[key];
+        
+        // 特殊处理 variables 字段
+        if (key === 'variables') {
+          logger.info(`🔍 处理 variables 字段，原始类型: ${typeof value}`);
+          
+          // 如果是字符串，尝试解析为数组
+          if (typeof value === 'string') {
+            logger.info(`🔍 variables 是字符串，尝试解析`);
+            try {
+              value = JSON.parse(value);
+              logger.info(`✅ variables 解析成功，是数组: ${Array.isArray(value)}`);
+            } catch (e) {
+              logger.error(`❌ variables 字段解析失败: ${e.message}`);
+              return;
+            }
+          }
+          
+          // 确保是数组
+          if (!Array.isArray(value)) {
+            logger.error(`❌ variables 不是数组，类型: ${typeof value}`);
+            return;
+          }
+          
+          // 验证数组元素格式
+          const isValid = value.every(v => 
+            v && typeof v === 'object' && 
+            typeof v.name === 'string' && 
+            typeof v.label === 'string'
+          );
+          if (!isValid) {
+            logger.error(`❌ variables 数组元素格式不正确`);
+            return;
+          }
+          
+          logger.info(`✅ variables 验证通过，准备更新`);
+        }
+        
+        updateData[key] = value;
+      }
+    });
 
-    template.updatedBy = req.admin.username;
-    await template.save();
+    // 使用 MongoDB 原生操作，完全绕过 Mongoose
+    updateData.updatedBy = req.admin.username;
+    updateData.updatedAt = new Date();
+    
+    const mongoose = require('mongoose');
+    const db = mongoose.connection.db;
+    
+    await db.collection('emailtemplates').updateOne(
+      { _id: new mongoose.Types.ObjectId(id) },
+      { $set: updateData }
+    );
 
-    logger.info(`✅ 管理员 ${req.admin.username} 更新邮件模板: ${template.name}`);
+    // 获取更新后的模板
+    const updatedTemplate = await db.collection('emailtemplates').findOne(
+      { _id: new mongoose.Types.ObjectId(id) }
+    );
+
+    logger.info(`✅ 管理员 ${req.admin.username} 更新邮件模板: ${updatedTemplate.name}`);
 
     res.json({
       success: true,
       message: '模板更新成功',
       data: {
-        id: template._id.toString(),
-        ...template.toObject()
+        ...updatedTemplate,
+        id: updatedTemplate._id.toString()
       }
     });
   } catch (error) {

@@ -990,4 +990,88 @@ router.post('/change-password', authenticateUserDb, async (req, res) => {
   }
 })
 
+// 🔑 请求密码重置
+router.post('/request-password-reset', async (req, res) => {
+  try {
+    const { email } = req.body
+
+    if (!email) {
+      return res.status(400).json({
+        error: 'Invalid input',
+        message: '邮箱不能为空'
+      })
+    }
+
+    // 简单的邮箱格式验证
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return res.status(400).json({
+        error: 'Invalid input',
+        message: '邮箱格式不正确'
+      })
+    }
+
+    const result = await userServiceDb.requestPasswordReset(email)
+
+    if (!result.success) {
+      return res.status(400).json({
+        error: result.error,
+        message: result.message
+      })
+    }
+
+    res.json({
+      success: true,
+      message: result.message
+    })
+  } catch (error) {
+    logger.error('❌ Request password reset error:', error)
+    res.status(500).json({
+      error: 'Request password reset error',
+      message: '请求密码重置失败'
+    })
+  }
+})
+
+// 🔑 重置密码
+router.post('/reset-password', async (req, res) => {
+  try {
+    const { token, newPassword } = req.body
+
+    if (!token || !newPassword) {
+      return res.status(400).json({
+        error: 'Invalid input',
+        message: '令牌和新密码不能为空'
+      })
+    }
+
+    // 验证新密码长度
+    if (newPassword.length < 6) {
+      return res.status(400).json({
+        error: 'Invalid input',
+        message: '新密码长度至少6位'
+      })
+    }
+
+    const result = await userServiceDb.resetPassword(token, newPassword)
+
+    if (!result.success) {
+      return res.status(400).json({
+        error: result.error,
+        message: result.message
+      })
+    }
+
+    res.json({
+      success: true,
+      message: result.message
+    })
+  } catch (error) {
+    logger.error('❌ Reset password error:', error)
+    res.status(500).json({
+      error: 'Reset password error',
+      message: '重置密码失败'
+    })
+  }
+})
+
 module.exports = router
