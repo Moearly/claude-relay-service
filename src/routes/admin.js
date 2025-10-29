@@ -185,6 +185,190 @@ router.get('/users/:userId/usage-stats', authenticateAdmin, async (req, res) => 
   }
 })
 
+// 获取用户使用详情（按 API Key 维度）
+router.get('/users/:userId/usage-details-by-apikey', authenticateAdmin, async (req, res) => {
+  try {
+    const { userId } = req.params
+    const { timeRange = '7d' } = req.query
+    const redis = require('../models/redis')
+    const User = require('../models/User')
+    
+    // 验证用户是否存在
+    const user = await User.findById(userId)
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        error: '用户不存在'
+      })
+    }
+
+    // 计算时间范围
+    const now = new Date()
+    let startDate = new Date()
+    switch (timeRange) {
+      case '24h':
+        startDate.setHours(now.getHours() - 24)
+        break
+      case '7d':
+        startDate.setDate(now.getDate() - 7)
+        break
+      case '30d':
+        startDate.setDate(now.getDate() - 30)
+        break
+      case '90d':
+        startDate.setDate(now.getDate() - 90)
+        break
+      default:
+        startDate.setDate(now.getDate() - 7)
+    }
+
+    // 获取用户的所有 API Keys
+    const apiKeys = await redis.getAllApiKeys()
+    const userApiKeys = apiKeys.filter(key => key.userId === userId)
+
+    // 为每个 API Key 收集使用数据
+    const apiKeyDetails = []
+    let totalRequests = 0
+    let totalTokens = 0
+    let totalInputTokens = 0
+    let totalOutputTokens = 0
+    let totalCost = 0
+
+    for (const apiKey of userApiKeys) {
+      try {
+        // 获取该 API Key 的使用统计
+        const usageKey = `usage:${apiKey.id}`
+        const usageData = await redis.getAsync(usageKey)
+        
+        let keyRequests = 0
+        let keyInputTokens = 0
+        let keyOutputTokens = 0
+        let keyCost = 0
+        let history = []
+        let modelDistribution = []
+
+        if (usageData) {
+          const usage = JSON.parse(usageData)
+          keyRequests = usage.totalRequests || 0
+          keyInputTokens = usage.totalInputTokens || 0
+          keyOutputTokens = usage.totalOutputTokens || 0
+          keyCost = usage.totalCost || 0
+
+          // 生成历史数据（按天）
+          if (usage.dailyStats) {
+            const dailyStatsMap = new Map()
+            
+            // 遍历所有日期的统计
+            for (const [date, stats] of Object.entries(usage.dailyStats)) {
+              const dateObj = new Date(date)
+              if (dateObj >= startDate && dateObj <= now) {
+                dailyStatsMap.set(date, {
+                  date: date,
+                  requests: stats.requests || 0,
+                  inputTokens: stats.inputTokens || 0,
+                  outputTokens: stats.outputTokens || 0,
+                  cost: stats.cost || 0,
+                  tokens: (stats.inputTokens || 0) + (stats.outputTokens || 0)
+                })
+              }
+            }
+
+            // 填充缺失的日期
+            const currentDate = new Date(startDate)
+            while (currentDate <= now) {
+              const dateStr = currentDate.toISOString().split('T')[0]
+              if (!dailyStatsMap.has(dateStr)) {
+                dailyStatsMap.set(dateStr, {
+                  date: dateStr,
+                  requests: 0,
+                  inputTokens: 0,
+                  outputTokens: 0,
+                  cost: 0,
+                  tokens: 0
+                })
+              }
+              currentDate.setDate(currentDate.getDate() + 1)
+            }
+
+            // 转换为数组并排序
+            history = Array.from(dailyStatsMap.values()).sort((a, b) => 
+              new Date(a.date).getTime() - new Date(b.date).getTime()
+            )
+          }
+
+          // 模型分布统计
+          if (usage.modelStats) {
+            modelDistribution = Object.entries(usage.modelStats).map(([model, stats]) => ({
+              model,
+              requests: stats.requests || 0,
+              tokens: (stats.inputTokens || 0) + (stats.outputTokens || 0),
+              cost: stats.cost || 0
+            })).sort((a, b) => b.requests - a.requests)
+          }
+        }
+
+        // 累加总计
+        totalRequests += keyRequests
+        totalTokens += keyInputTokens + keyOutputTokens
+        totalInputTokens += keyInputTokens
+        totalOutputTokens += keyOutputTokens
+        totalCost += keyCost
+
+        apiKeyDetails.push({
+          id: apiKey.id,
+          key: apiKey.key,
+          name: apiKey.name || 'Unnamed Key',
+          isActive: apiKey.isActive !== false,
+          totalRequests: keyRequests,
+          totalInputTokens: keyInputTokens,
+          totalOutputTokens: keyOutputTokens,
+          totalTokens: keyInputTokens + keyOutputTokens,
+          totalCost: keyCost,
+          history,
+          modelDistribution,
+          createdAt: apiKey.createdAt,
+          lastUsedAt: apiKey.lastUsedAt
+        })
+      } catch (err) {
+        logger.error(`❌ 获取 API Key ${apiKey.id} 使用数据失败:`, err)
+        // 继续处理其他 API Key
+      }
+    }
+
+    // 按请求数排序
+    apiKeyDetails.sort((a, b) => b.totalRequests - a.totalRequests)
+
+    const result = {
+      success: true,
+      data: {
+        userId: userId,
+        username: user.username,
+        email: user.email,
+        timeRange,
+        summary: {
+          totalApiKeys: userApiKeys.length,
+          activeApiKeys: userApiKeys.filter(k => k.isActive !== false).length,
+          totalRequests,
+          totalTokens,
+          totalInputTokens,
+          totalOutputTokens,
+          totalCost
+        },
+        apiKeys: apiKeyDetails
+      }
+    }
+
+    logger.info(`✅ 获取用户 ${userId} 的使用详情成功，共 ${apiKeyDetails.length} 个 API Key`)
+    res.json(result)
+  } catch (error) {
+    logger.error('❌ 获取用户使用详情失败:', error)
+    res.status(500).json({
+      success: false,
+      error: error.message || '获取用户使用详情失败'
+    })
+  }
+})
+
 // 禁用用户的所有 API Keys（管理员）
 router.post('/users/:userId/disable-keys', authenticateAdmin, async (req, res) => {
   try {
