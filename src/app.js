@@ -262,14 +262,23 @@ class Application {
       this.app.use('/api', apiRoutes)
       this.app.use('/claude', apiRoutes) // /claude 路由别名，与 /api 功能相同
       this.app.use('/admin', adminRoutes)
-      this.app.use('/users', userRoutes)
-      // 使用 web 路由（包含 auth 和页面重定向）
-      this.app.use('/web', webRoutes)
-      this.app.use('/apiStats', apiStatsRoutes)
+      
+      // ⚠️ 重要：具体的 /users/* 路由必须在通用的 /users 路由之前注册
       // 💰 商业化功能路由
       this.app.use('/users/credits', creditsRoutes)
       this.app.use('/users/subscription', subscriptionRoutes)
-      this.app.use('/users/invoices', invoiceRoutes)
+      this.app.use('/users/invoices', require('./routes/invoiceRoutes'))
+      // 🎫 工单系统路由
+      this.app.use('/users/tickets', require('./routes/ticketRoutes'))
+      // 👥 邀请系统路由
+      this.app.use('/users/referral', require('./routes/referralRoutes'))
+      
+      // 通用 /users 路由（必须放在最后）
+      this.app.use('/users', userRoutes)
+      
+      // 使用 web 路由（包含 auth 和页面重定向）
+      this.app.use('/web', webRoutes)
+      this.app.use('/apiStats', apiStatsRoutes)
       this.app.use('/announcements', announcementsRoutes)
       // 📧 邮件管理路由
       this.app.use('/admin/email', require('./routes/emailRoutes'))

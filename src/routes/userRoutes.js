@@ -237,11 +237,19 @@ router.post('/login', async (req, res) => {
 })
 
 // 🚪 用户登出端点
-router.post('/logout', authenticateUser, async (req, res) => {
+router.post('/logout', authenticateUserDb, async (req, res) => {
   try {
-    await userService.invalidateUserSession(req.user.sessionToken)
-
+    // JWT 认证不需要服务器端 session 管理
+    // 只需要前端删除 token 即可
     logger.info(`👋 User logout: ${req.user.username}`)
+
+    // 清除 cookie (如果使用 cookie 存储 token)
+    res.clearCookie('auth_token', {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      path: '/'
+    })
 
     res.json({
       success: true,
@@ -1070,6 +1078,84 @@ router.post('/reset-password', async (req, res) => {
     res.status(500).json({
       error: 'Reset password error',
       message: '重置密码失败'
+    })
+  }
+})
+
+/**
+ * 获取最近使用统计
+ * GET /users/apiStats/recent
+ */
+router.get('/apiStats/recent', authenticateUserDb, async (req, res) => {
+  try {
+    const userId = req.user._id
+    const redis = require('../models/redis')
+    const ApiKey = require('../models/ApiKey')
+
+    // 获取用户的所有 API Keys
+    const apiKeys = await ApiKey.find({ userId }).select('key').lean()
+    
+    if (!apiKeys || apiKeys.length === 0) {
+      return res.json({
+        success: true,
+        data: {
+          totalRequests: 0,
+          totalTokens: 0,
+          totalCost: 0,
+          apiKeys: []
+        }
+      })
+    }
+
+    // 统计所有 API Key 的使用情况
+    let totalRequests = 0
+    let totalTokens = 0
+    let totalCost = 0
+    const apiKeyStats = []
+
+    for (const apiKey of apiKeys) {
+      try {
+        // 从 Redis 获取统计数据
+        const statsKey = `api_key_stats:${apiKey.key}`
+        const stats = await redis.hgetall(statsKey)
+        
+        if (stats && Object.keys(stats).length > 0) {
+          const requests = parseInt(stats.requests || 0)
+          const tokens = parseInt(stats.tokens || 0)
+          const cost = parseFloat(stats.cost || 0)
+          
+          totalRequests += requests
+          totalTokens += tokens
+          totalCost += cost
+          
+          apiKeyStats.push({
+            key: apiKey.key.substring(0, 8) + '...',
+            requests,
+            tokens,
+            cost: cost.toFixed(4)
+          })
+        }
+      } catch (error) {
+        logger.error(`获取 API Key ${apiKey.key} 统计失败:`, error)
+      }
+    }
+
+    logger.info(`✅ 用户 ${req.user.username} 获取使用统计`)
+
+    res.json({
+      success: true,
+      data: {
+        totalRequests,
+        totalTokens,
+        totalCost: totalCost.toFixed(4),
+        apiKeys: apiKeyStats
+      }
+    })
+  } catch (error) {
+    logger.error('❌ 获取使用统计失败:', error)
+    res.status(500).json({
+      success: false,
+      error: error.message || '获取使用统计失败'
     })
   }
 })

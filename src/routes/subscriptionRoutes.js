@@ -1,6 +1,5 @@
 const express = require('express')
 const router = express.Router()
-const { authenticateUser } = require('../middleware/auth')
 const { authenticateUserDb } = require('../middleware/dbAuth')
 const logger = require('../utils/logger')
 const { User, Order, SubscriptionPlan } = require('../models')

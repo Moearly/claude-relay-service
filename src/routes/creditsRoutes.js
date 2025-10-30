@@ -1,6 +1,5 @@
 const express = require('express')
 const router = express.Router()
-const { authenticateUser } = require('../middleware/auth')
 const { authenticateUserDb } = require('../middleware/dbAuth')
 const logger = require('../utils/logger')
 const { CreditRecord, User } = require('../models')
@@ -12,7 +11,7 @@ const cardKeyService = require('../services/cardKeyService')
  */
 
 // 获取积分历史记录
-router.get('/history', authenticateUser, async (req, res) => {
+router.get('/history', authenticateUserDb, async (req, res) => {
   try {
     const { limit = 50, offset = 0 } = req.query
     const userId = req.user.id
@@ -68,28 +67,77 @@ router.get('/history', authenticateUser, async (req, res) => {
 })
 
 // 获取积分趋势数据
-router.get('/trends', authenticateUser, async (req, res) => {
+router.get('/trends', authenticateUserDb, async (req, res) => {
   try {
     const { days = 7 } = req.query
     const userId = req.user.id
+    const redis = require('../models/redis')
+    const ApiKey = require('../models/ApiKey')
 
-    // TODO: 从数据库计算趋势
-    // 暂时返回模拟数据
-    const mockTrends = []
-    for (let i = days - 1; i >= 0; i--) {
+    // 获取用户的所有 API Keys
+    const apiKeys = await ApiKey.find({ userId }).select('key').lean()
+    
+    // 初始化趋势数据
+    const trends = []
+    const numDays = parseInt(days)
+    
+    // 如果用户没有 API Key，返回空趋势
+    if (!apiKeys || apiKeys.length === 0) {
+      for (let i = numDays - 1; i >= 0; i--) {
+        const date = new Date(Date.now() - i * 86400000)
+        trends.push({
+          date: `${date.getMonth() + 1}/${date.getDate()}`,
+          credits: 0,
+          rmb: 0,
+          usd: 0,
+          tokens: 0
+        })
+      }
+      return res.json({
+        success: true,
+        trends
+      })
+    }
+
+    // 获取每天的统计数据
+    for (let i = numDays - 1; i >= 0; i--) {
       const date = new Date(Date.now() - i * 86400000)
-      mockTrends.push({
+      const dateStr = date.toISOString().split('T')[0] // YYYY-MM-DD
+      
+      let dayCredits = 0
+      let dayTokens = 0
+      let dayCost = 0
+      
+      // 统计所有 API Key 在这一天的使用
+      for (const apiKey of apiKeys) {
+        try {
+          const dailyStatsKey = `api_key_daily:${apiKey.key}:${dateStr}`
+          const stats = await redis.hgetall(dailyStatsKey)
+          
+          if (stats && Object.keys(stats).length > 0) {
+            dayTokens += parseInt(stats.tokens || 0)
+            dayCost += parseFloat(stats.cost || 0)
+          }
+        } catch (error) {
+          // 忽略单个 key 的错误
+        }
+      }
+      
+      // 估算积分消耗（假设 1000 tokens ≈ 100 credits）
+      dayCredits = Math.floor(dayTokens / 10)
+      
+      trends.push({
         date: `${date.getMonth() + 1}/${date.getDate()}`,
-        credits: Math.floor(1200 + Math.random() * 1000),
-        rmb: Math.floor(6 + Math.random() * 5),
-        usd: parseFloat((0.85 + Math.random() * 0.7).toFixed(2)),
-        tokens: Math.floor(24000 + Math.random() * 20000)
+        credits: dayCredits,
+        rmb: parseFloat((dayCost * 7.2).toFixed(2)), // 假设 1 USD = 7.2 RMB
+        usd: parseFloat(dayCost.toFixed(2)),
+        tokens: dayTokens
       })
     }
 
     res.json({
       success: true,
-      trends: mockTrends
+      trends
     })
   } catch (error) {
     logger.error('获取积分趋势失败:', error)
@@ -101,7 +149,7 @@ router.get('/trends', authenticateUser, async (req, res) => {
 })
 
 // 兑换卡密
-router.post('/redeem', authenticateUser, async (req, res) => {
+router.post('/redeem', authenticateUserDb, async (req, res) => {
   try {
     const { code } = req.body
     const userId = req.user.id

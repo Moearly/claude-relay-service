@@ -10249,4 +10249,535 @@ router.post('/email-settings/test', authenticateAdmin, async (req, res) => {
   }
 })
 
+// ==================== 工单管理 (Ticket Management) ====================
+
+/**
+ * 获取工单列表
+ * GET /admin/tickets
+ */
+router.get('/tickets', authenticateAdmin, async (req, res) => {
+  try {
+    const Ticket = require('../models/Ticket')
+    const { status, category, priority, assignedTo, search, page = 1, limit = 20 } = req.query
+
+    const query = {}
+
+    if (status) {
+      query.status = status
+    }
+    if (category) {
+      query.category = category
+    }
+    if (priority) {
+      query.priority = priority
+    }
+    if (assignedTo) {
+      query.assignedTo = assignedTo
+    }
+    if (search) {
+      query.$or = [
+        { ticketNo: new RegExp(search, 'i') },
+        { subject: new RegExp(search, 'i') },
+        { username: new RegExp(search, 'i') },
+        { userEmail: new RegExp(search, 'i') }
+      ]
+    }
+
+    const skip = (parseInt(page) - 1) * parseInt(limit)
+
+    const [tickets, total] = await Promise.all([
+      Ticket.find(query)
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(parseInt(limit))
+        .lean(),
+      Ticket.countDocuments(query)
+    ])
+
+    logger.info(`📋 管理员 ${req.admin.username} 查询工单列表，共 ${total} 条`)
+
+    res.json({
+      success: true,
+      data: tickets,
+      pagination: {
+        total,
+        page: parseInt(page),
+        limit: parseInt(limit),
+        pages: Math.ceil(total / parseInt(limit))
+      }
+    })
+  } catch (error) {
+    logger.error('❌ 获取工单列表失败:', error)
+    res.status(500).json({
+      success: false,
+      error: error.message || '获取工单列表失败'
+    })
+  }
+})
+
+/**
+ * 获取工单详情
+ * GET /admin/tickets/:ticketId
+ */
+router.get('/tickets/:ticketId', authenticateAdmin, async (req, res) => {
+  try {
+    const Ticket = require('../models/Ticket')
+    const { ticketId } = req.params
+
+    const ticket = await Ticket.findById(ticketId)
+
+    if (!ticket) {
+      return res.status(404).json({
+        success: false,
+        error: '工单不存在'
+      })
+    }
+
+    logger.info(`📄 管理员 ${req.admin.username} 查看工单: ${ticket.ticketNo}`)
+
+    res.json({
+      success: true,
+      data: ticket
+    })
+  } catch (error) {
+    logger.error('❌ 获取工单详情失败:', error)
+    res.status(500).json({
+      success: false,
+      error: error.message || '获取工单详情失败'
+    })
+  }
+})
+
+/**
+ * 回复工单
+ * POST /admin/tickets/:ticketId/reply
+ */
+router.post('/tickets/:ticketId/reply', authenticateAdmin, async (req, res) => {
+  try {
+    const Ticket = require('../models/Ticket')
+    const { ticketId } = req.params
+    const { content, attachments, isInternal } = req.body
+
+    if (!content) {
+      return res.status(400).json({
+        success: false,
+        error: '回复内容不能为空'
+      })
+    }
+
+    const ticket = await Ticket.findById(ticketId)
+
+    if (!ticket) {
+      return res.status(404).json({
+        success: false,
+        error: '工单不存在'
+      })
+    }
+
+    await ticket.addReply({
+      replyBy: 'admin',
+      replyById: req.admin._id,
+      replyByName: req.admin.username,
+      content,
+      attachments: attachments || [],
+      isInternal: isInternal || false
+    })
+
+    logger.info(`💬 管理员 ${req.admin.username} 回复工单: ${ticket.ticketNo}`)
+
+    res.json({
+      success: true,
+      data: ticket
+    })
+  } catch (error) {
+    logger.error('❌ 回复工单失败:', error)
+    res.status(500).json({
+      success: false,
+      error: error.message || '回复工单失败'
+    })
+  }
+})
+
+/**
+ * 更新工单状态
+ * PUT /admin/tickets/:ticketId/status
+ */
+router.put('/tickets/:ticketId/status', authenticateAdmin, async (req, res) => {
+  try {
+    const Ticket = require('../models/Ticket')
+    const { ticketId } = req.params
+    const { status } = req.body
+
+    if (!status) {
+      return res.status(400).json({
+        success: false,
+        error: '状态不能为空'
+      })
+    }
+
+    const ticket = await Ticket.findById(ticketId)
+
+    if (!ticket) {
+      return res.status(404).json({
+        success: false,
+        error: '工单不存在'
+      })
+    }
+
+    await ticket.updateStatus(status)
+
+    logger.info(`🔄 管理员 ${req.admin.username} 更新工单 ${ticket.ticketNo} 状态为: ${status}`)
+
+    res.json({
+      success: true,
+      data: ticket
+    })
+  } catch (error) {
+    logger.error('❌ 更新工单状态失败:', error)
+    res.status(500).json({
+      success: false,
+      error: error.message || '更新工单状态失败'
+    })
+  }
+})
+
+/**
+ * 分配工单
+ * PUT /admin/tickets/:ticketId/assign
+ */
+router.put('/tickets/:ticketId/assign', authenticateAdmin, async (req, res) => {
+  try {
+    const Ticket = require('../models/Ticket')
+    const { ticketId } = req.params
+    const { adminId } = req.body
+
+    const ticket = await Ticket.findById(ticketId)
+
+    if (!ticket) {
+      return res.status(404).json({
+        success: false,
+        error: '工单不存在'
+      })
+    }
+
+    // 如果没有指定 adminId，分配给当前管理员
+    const targetAdminId = adminId || req.admin._id
+    const targetAdminName = adminId ? '其他管理员' : req.admin.username
+
+    await ticket.assignTo(targetAdminId, targetAdminName)
+
+    logger.info(`👤 管理员 ${req.admin.username} 分配工单 ${ticket.ticketNo} 给: ${targetAdminName}`)
+
+    res.json({
+      success: true,
+      data: ticket
+    })
+  } catch (error) {
+    logger.error('❌ 分配工单失败:', error)
+    res.status(500).json({
+      success: false,
+      error: error.message || '分配工单失败'
+    })
+  }
+})
+
+/**
+ * 批量更新工单状态
+ * PUT /admin/tickets/batch/status
+ */
+router.put('/tickets/batch/status', authenticateAdmin, async (req, res) => {
+  try {
+    const Ticket = require('../models/Ticket')
+    const { ticketIds, status } = req.body
+
+    if (!ticketIds || !Array.isArray(ticketIds) || ticketIds.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: '请选择要更新的工单'
+      })
+    }
+
+    if (!status) {
+      return res.status(400).json({
+        success: false,
+        error: '状态不能为空'
+      })
+    }
+
+    const result = await Ticket.updateMany(
+      { _id: { $in: ticketIds } },
+      { 
+        $set: { 
+          status,
+          ...(status === 'resolved' && { resolvedAt: new Date() }),
+          ...(status === 'closed' && { closedAt: new Date() })
+        } 
+      }
+    )
+
+    logger.info(`🔄 管理员 ${req.admin.username} 批量更新 ${result.modifiedCount} 个工单状态为: ${status}`)
+
+    res.json({
+      success: true,
+      message: `已更新 ${result.modifiedCount} 个工单`,
+      data: result
+    })
+  } catch (error) {
+    logger.error('❌ 批量更新工单状态失败:', error)
+    res.status(500).json({
+      success: false,
+      error: error.message || '批量更新工单状态失败'
+    })
+  }
+})
+
+/**
+ * 获取工单统计
+ * GET /admin/tickets/stats/summary
+ */
+router.get('/tickets/stats/summary', authenticateAdmin, async (req, res) => {
+  try {
+    const Ticket = require('../models/Ticket')
+
+    const [
+      total,
+      open,
+      inProgress,
+      waitingUser,
+      waitingAdmin,
+      resolved,
+      closed,
+      byCategory,
+      byPriority,
+      avgResponseTime,
+      avgResolutionTime
+    ] = await Promise.all([
+      Ticket.countDocuments(),
+      Ticket.countDocuments({ status: 'open' }),
+      Ticket.countDocuments({ status: 'in_progress' }),
+      Ticket.countDocuments({ status: 'waiting_user' }),
+      Ticket.countDocuments({ status: 'waiting_admin' }),
+      Ticket.countDocuments({ status: 'resolved' }),
+      Ticket.countDocuments({ status: 'closed' }),
+      Ticket.aggregate([
+        { $group: { _id: '$category', count: { $sum: 1 } } }
+      ]),
+      Ticket.aggregate([
+        { $group: { _id: '$priority', count: { $sum: 1 } } }
+      ]),
+      Ticket.aggregate([
+        { $match: { firstResponseAt: { $ne: null } } },
+        { $project: { responseTime: { $subtract: ['$firstResponseAt', '$createdAt'] } } },
+        { $group: { _id: null, avg: { $avg: '$responseTime' } } }
+      ]),
+      Ticket.aggregate([
+        { $match: { resolvedAt: { $ne: null } } },
+        { $project: { resolutionTime: { $subtract: ['$resolvedAt', '$createdAt'] } } },
+        { $group: { _id: null, avg: { $avg: '$resolutionTime' } } }
+      ])
+    ])
+
+    const stats = {
+      total,
+      byStatus: {
+        open,
+        inProgress,
+        waitingUser,
+        waitingAdmin,
+        resolved,
+        closed
+      },
+      byCategory: byCategory.reduce((acc, item) => {
+        acc[item._id] = item.count
+        return acc
+      }, {}),
+      byPriority: byPriority.reduce((acc, item) => {
+        acc[item._id] = item.count
+        return acc
+      }, {}),
+      avgResponseTime: avgResponseTime[0]?.avg ? Math.floor(avgResponseTime[0].avg / 1000 / 60) : 0, // 分钟
+      avgResolutionTime: avgResolutionTime[0]?.avg ? Math.floor(avgResolutionTime[0].avg / 1000 / 60 / 60) : 0 // 小时
+    }
+
+    logger.info(`📊 管理员 ${req.admin.username} 查询工单统计`)
+
+    res.json({
+      success: true,
+      data: stats
+    })
+  } catch (error) {
+    logger.error('❌ 获取工单统计失败:', error)
+    res.status(500).json({
+      success: false,
+      error: error.message || '获取工单统计失败'
+    })
+  }
+})
+
+/**
+ * 删除工单
+ * DELETE /admin/tickets/:ticketId
+ */
+router.delete('/tickets/:ticketId', authenticateAdmin, async (req, res) => {
+  try {
+    const Ticket = require('../models/Ticket')
+    const { ticketId } = req.params
+
+    const ticket = await Ticket.findByIdAndDelete(ticketId)
+
+    if (!ticket) {
+      return res.status(404).json({
+        success: false,
+        error: '工单不存在'
+      })
+    }
+
+    logger.info(`🗑️ 管理员 ${req.admin.username} 删除工单: ${ticket.ticketNo}`)
+
+    res.json({
+      success: true,
+      message: '工单已删除'
+    })
+  } catch (error) {
+    logger.error('❌ 删除工单失败:', error)
+    res.status(500).json({
+      success: false,
+      error: error.message || '删除工单失败'
+    })
+  }
+})
+
+// ==================== 邀请系统管理 (Referral Management) ====================
+
+/**
+ * 获取邀请统计
+ * GET /admin/referral/stats
+ */
+router.get('/referral/stats', authenticateAdmin, async (req, res) => {
+  try {
+    const User = require('../models/User')
+
+    // 获取所有有邀请记录的用户
+    const usersWithInvites = await User.find({
+      invitedUsers: { $exists: true, $ne: [] }
+    })
+      .select('username email invitationCode invitedUsers invitationRewards')
+      .populate('invitedUsers', 'username email createdAt subscription')
+      .lean()
+
+    // 计算总体统计
+    const totalInvites = await User.countDocuments({
+      invitedBy: { $exists: true, $ne: null }
+    })
+
+    const activeInvites = await User.countDocuments({
+      invitedBy: { $exists: true, $ne: null },
+      'subscription.planId': { $ne: 'free' }
+    })
+
+    // 邀请排行榜
+    const leaderboard = usersWithInvites
+      .map((user) => ({
+        userId: user._id,
+        username: user.username,
+        email: user.email,
+        inviteCode: user.invitationCode,
+        totalInvited: user.invitedUsers?.length || 0,
+        activeInvited:
+          user.invitedUsers?.filter(
+            (u) => u.subscription?.planId !== 'free'
+          ).length || 0,
+        totalRewards: user.invitationRewards || 0
+      }))
+      .sort((a, b) => b.totalInvited - a.totalInvited)
+      .slice(0, 20)
+
+    logger.info(`📊 管理员 ${req.admin.username} 查询邀请统计`)
+
+    res.json({
+      success: true,
+      data: {
+        overview: {
+          totalInvites,
+          activeInvites,
+          conversionRate:
+            totalInvites > 0
+              ? ((activeInvites / totalInvites) * 100).toFixed(2)
+              : 0
+        },
+        leaderboard
+      }
+    })
+  } catch (error) {
+    logger.error('❌ 获取邀请统计失败:', error)
+    res.status(500).json({
+      success: false,
+      error: error.message || '获取邀请统计失败'
+    })
+  }
+})
+
+/**
+ * 获取邀请详情
+ * GET /admin/referral/users/:userId
+ */
+router.get('/referral/users/:userId', authenticateAdmin, async (req, res) => {
+  try {
+    const User = require('../models/User')
+    const { userId } = req.params
+
+    const user = await User.findById(userId)
+      .select('username email invitationCode invitedUsers invitationRewards')
+      .populate('invitedUsers', 'username email createdAt subscription credits')
+      .lean()
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        error: '用户不存在'
+      })
+    }
+
+    // 格式化邀请记录
+    const invites = (user.invitedUsers || []).map((invitedUser) => ({
+      userId: invitedUser._id,
+      username: invitedUser.username,
+      email: invitedUser.email,
+      registeredAt: invitedUser.createdAt,
+      planId: invitedUser.subscription?.planId || 'free',
+      planName: invitedUser.subscription?.planName || '免费版',
+      credits: invitedUser.credits || 0,
+      status: invitedUser.subscription?.planId !== 'free' ? 'active' : 'pending'
+    }))
+
+    logger.info(
+      `📊 管理员 ${req.admin.username} 查询用户 ${user.username} 的邀请详情`
+    )
+
+    res.json({
+      success: true,
+      data: {
+        user: {
+          userId: user._id,
+          username: user.username,
+          email: user.email,
+          inviteCode: user.invitationCode,
+          totalRewards: user.invitationRewards || 0
+        },
+        invites,
+        stats: {
+          totalInvited: invites.length,
+          activeInvited: invites.filter((i) => i.status === 'active').length
+        }
+      }
+    })
+  } catch (error) {
+    logger.error('❌ 获取邀请详情失败:', error)
+    res.status(500).json({
+      success: false,
+      error: error.message || '获取邀请详情失败'
+    })
+  }
+})
+
 module.exports = router
