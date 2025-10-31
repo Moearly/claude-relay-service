@@ -2,12 +2,12 @@ const mongoose = require('mongoose')
 
 const invoiceSchema = new mongoose.Schema({
   // 用户信息
-  userId: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User',
-    required: true,
-    index: true
-  },
+    userId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      required: true,
+      index: true
+    },
   username: { type: String, required: true },
   userEmail: { type: String, required: true },
 
@@ -16,16 +16,16 @@ const invoiceSchema = new mongoose.Schema({
   amount: { type: Number, required: true },
 
   // 发票信息
-  invoiceType: {
-    type: String,
+    invoiceType: {
+      type: String,
     enum: ['normal', 'vat'], // normal: 普通发票, vat: 增值税专用发票
     default: 'normal'
-  },
-  invoiceTitle: {
-    type: String,
+    },
+    invoiceTitle: {
+      type: String,
     enum: ['personal', 'company'], // personal: 个人, company: 企业
-    required: true
-  },
+      required: true
+    },
 
   // 企业信息（企业抬头时必填）
   companyName: { type: String },
@@ -37,8 +37,8 @@ const invoiceSchema = new mongoose.Schema({
   address: { type: String },
 
   // 发票状态
-  status: {
-    type: String,
+    status: {
+      type: String,
     enum: ['pending', 'processing', 'issued', 'rejected'],
     default: 'pending'
   },

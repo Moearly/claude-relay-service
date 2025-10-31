@@ -398,10 +398,10 @@ node scripts/tools/manage-session-windows.js debug
 
 ### 查看脚本帮助
 大多数脚本支持 `--help` 参数：
-```bash
+   ```bash
 node scripts/tools/data-transfer-enhanced.js --help
 node scripts/tools/manage-session-windows.js help
-```
+   ```
 
 ### 常见问题
 1. **部署失败**: 检查 SSH 连接和服务器状态

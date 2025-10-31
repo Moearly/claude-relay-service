@@ -23,9 +23,9 @@ router.get('/', authenticateUserDb, async (req, res) => {
 
     const [invoices, total] = await Promise.all([
       Invoice.find(query)
-        .sort({ createdAt: -1 })
+      .sort({ createdAt: -1 })
         .skip(skip)
-        .limit(parseInt(limit))
+      .limit(parseInt(limit))
         .lean(),
       Invoice.countDocuments(query)
     ])
@@ -141,7 +141,7 @@ router.post('/', authenticateUserDb, async (req, res) => {
         return res.status(400).json({
           success: false,
           error: '税号不能为空'
-        })
+      })
       }
     }
 

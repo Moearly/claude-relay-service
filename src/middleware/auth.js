@@ -525,7 +525,7 @@ const authenticateApiKey = async (req, res, next) => {
   }
 }
 
-// 🛡️ 管理员验证中间件（优化版）
+// 🛡️ 管理员验证中间件（支持JWT和Redis Session）
 const authenticateAdmin = async (req, res, next) => {
   const startTime = Date.now()
 
@@ -551,6 +551,28 @@ const authenticateAdmin = async (req, res, next) => {
         error: 'Invalid admin token format',
         message: 'Admin token format is invalid'
       })
+    }
+
+    // 尝试JWT验证
+    try {
+      const jwt = require('jsonwebtoken')
+      const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-super-secret-jwt-key')
+      
+      // JWT验证成功
+      if (decoded && (decoded.role === 'admin' || decoded.role === 'super_admin')) {
+        req.admin = {
+          id: decoded.id,
+          username: decoded.username,
+          role: decoded.role
+        }
+        
+        const authDuration = Date.now() - startTime
+        logger.security(`🔐 Admin authenticated via JWT: ${decoded.username} in ${authDuration}ms`)
+        return next()
+      }
+    } catch (jwtError) {
+      // JWT验证失败，尝试Redis session
+      logger.debug('JWT verification failed, trying Redis session:', jwtError.message)
     }
 
     // 获取管理员会话（带超时处理）
@@ -609,7 +631,7 @@ const authenticateAdmin = async (req, res, next) => {
     }
 
     const authDuration = Date.now() - startTime
-    logger.security(`🔐 Admin authenticated: ${adminSession.username} in ${authDuration}ms`)
+    logger.security(`🔐 Admin authenticated via Redis: ${adminSession.username} in ${authDuration}ms`)
 
     return next()
   } catch (error) {

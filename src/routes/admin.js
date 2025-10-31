@@ -26,6 +26,95 @@ const ProxyHelper = require('../utils/proxyHelper')
 
 const router = express.Router()
 
+// 🔐 管理员认证
+
+// 管理员登录
+router.post('/login', async (req, res) => {
+  try {
+    const { username, password } = req.body
+
+    if (!username || !password) {
+      return res.status(400).json({
+        success: false,
+        message: '用户名和密码不能为空'
+      })
+    }
+
+    const Admin = require('../models/Admin')
+    const bcrypt = require('bcryptjs')
+    const jwt = require('jsonwebtoken')
+
+    // 查找管理员
+    const admin = await Admin.findOne({ username })
+    if (!admin) {
+      logger.warn(`管理员登录失败: 用户名不存在 - ${username}`)
+      return res.status(401).json({
+        success: false,
+        message: '用户名或密码错误'
+      })
+    }
+
+    // 验证密码
+    const isPasswordValid = await bcrypt.compare(password, admin.password)
+    if (!isPasswordValid) {
+      logger.warn(`管理员登录失败: 密码错误 - ${username}`)
+      return res.status(401).json({
+        success: false,
+        message: '用户名或密码错误'
+      })
+    }
+
+    // 生成JWT token
+    const token = jwt.sign(
+      {
+        id: admin._id.toString(),
+        username: admin.username,
+        role: admin.role
+      },
+      process.env.JWT_SECRET || 'your-super-secret-jwt-key',
+      { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
+    )
+
+    logger.info(`管理员登录成功: ${username}`)
+
+    res.json({
+      success: true,
+      message: '登录成功',
+      token,
+      admin: {
+        id: admin._id.toString(),
+        username: admin.username,
+        role: admin.role
+      }
+    })
+  } catch (error) {
+    logger.error('管理员登录失败:', error)
+    res.status(500).json({
+      success: false,
+      message: '登录失败，请稍后重试'
+    })
+  }
+})
+
+// 管理员登出
+router.post('/logout', authenticateAdmin, async (req, res) => {
+  try {
+    // JWT是无状态的，登出只需要客户端删除token
+    logger.info(`管理员登出: ${req.admin.username}`)
+    
+    res.json({
+      success: true,
+      message: '登出成功'
+    })
+  } catch (error) {
+    logger.error('管理员登出失败:', error)
+    res.status(500).json({
+      success: false,
+      message: '登出失败'
+    })
+  }
+})
+
 // 👥 用户管理
 
 // 获取所有用户列表（用于API Key分配）
